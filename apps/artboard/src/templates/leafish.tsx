@@ -30,6 +30,7 @@ const Header = () => {
   const profiles = useArtboardStore((state) => state.resume.sections.profiles);
   const primaryColor = useArtboardStore((state) => state.resume.metadata.theme.primary);
   const fontSize = useArtboardStore((state) => state.resume.metadata.typography.font.size);
+  const payload = useArtboardStore((state) => state.resume.basics.payload);
 
   return (
     <div>
@@ -48,6 +49,7 @@ const Header = () => {
             className="wysiwyg"
             style={{ columns: section.columns }}
           />
+          <div className="">{payload}</div>
         </div>
 
         <Picture />

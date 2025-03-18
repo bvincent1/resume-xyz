@@ -46,6 +46,7 @@ const basicsSchema = z.object({
       grayscale: z.boolean(),
     }),
   }),
+  payload: z.string().optional(),
 });
 
 const sectionSchema = z.object({

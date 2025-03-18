@@ -106,6 +106,7 @@ const Header = () => {
 
 const Summary = () => {
   const section = useArtboardStore((state) => state.resume.sections.summary);
+  const payload = useArtboardStore((state) => state.resume.basics.payload);
 
   if (!section.visible || isEmptyString(section.content)) return null;
 
@@ -120,6 +121,7 @@ const Summary = () => {
         className="wysiwyg"
         style={{ columns: section.columns }}
       />
+      <div className="">{payload}</div>
     </section>
   );
 };

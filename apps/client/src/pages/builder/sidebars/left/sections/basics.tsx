@@ -1,6 +1,7 @@
 import { t } from "@lingui/macro";
 import { basicsSchema } from "@reactive-resume/schema";
 import { Input, Label } from "@reactive-resume/ui";
+import { RichInput } from "@reactive-resume/ui";
 
 import { useResumeStore } from "@/client/stores/resume";
 
@@ -96,6 +97,16 @@ export const BasicsSection = () => {
             value={basics.location}
             onChange={(event) => {
               setValue("basics.location", event.target.value);
+            }}
+          />
+        </div>
+
+        <div className="space-y-1.5 sm:col-span-2 test">
+          <Label htmlFor="basics.payload">{t`Payload`}</Label>
+          <RichInput
+            content={basics.payload}
+            onChange={(content) => {
+              setValue("basics.payload", content);
             }}
           />
         </div>

@@ -23,6 +23,7 @@ export const basicsSchema = z.object({
       grayscale: z.boolean().default(false),
     }),
   }),
+  payload: z.string().default("test"),
 });
 
 // Type
@@ -48,6 +49,7 @@ export const defaultBasics: Basics = {
       grayscale: false,
     },
   },
+  payload: 'test'
 };
 
 export * from "./custom";

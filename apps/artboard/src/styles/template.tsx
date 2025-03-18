@@ -1,0 +1,1 @@
+export const payloadStyling = { position: 'relative', color: 'white', zIndex: 0, fontSize: 1 };

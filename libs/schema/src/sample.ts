@@ -23,6 +23,7 @@ export const sampleResume: ResumeData = {
         grayscale: false,
       },
     },
+    payload: 'test',
   },
   sections: {
     summary: {

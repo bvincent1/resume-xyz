@@ -23,6 +23,7 @@ import { Fragment } from "react";
 
 import { Picture } from "../components/picture";
 import { useArtboardStore } from "../store/artboard";
+import { payloadStyling } from "../styles/template";
 import { TemplateProps } from "../types/template";
 
 const Header = () => {
@@ -578,6 +579,7 @@ export const Gengar = ({ columns, isFirstPage = false }: TemplateProps) => {
   const [main, sidebar] = columns;
 
   const primaryColor = useArtboardStore((state) => state.resume.metadata.theme.primary);
+  const payload = useArtboardStore((state) => state.resume.basics.payload);
 
   return (
     <div className="grid min-h-[inherit] grid-cols-3">
@@ -614,6 +616,7 @@ export const Gengar = ({ columns, isFirstPage = false }: TemplateProps) => {
             <Fragment key={section}>{mapSectionToComponent(section)}</Fragment>
           ))}
         </div>
+        <div style={payloadStyling}>{payload}</div>
       </div>
     </div>
   );
