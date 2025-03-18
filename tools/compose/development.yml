@@ -51,7 +51,16 @@ services:
       TOKEN: ${CHROME_TOKEN:-chrome_token}
       EXIT_ON_HEALTH_FAILURE: true
       PRE_REQUEST_HEALTH_CHECK: true
+  
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - ${RABBITMQ_CLIENT_PORT}:5672
+      - ${RABBITMQ_API_PORT}:15672
+    volumes:
+      - data_rabbitmq:/var/lib/rabbitmq/
 
 volumes:
   minio_data:
   postgres_data:
+  data_rabbitmq:
