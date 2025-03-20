@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "accounts",
     "job_applications",
+    "django_celery_beat",
 ]
 
 MIDDLEWARE = [

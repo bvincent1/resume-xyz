@@ -1573,6 +1573,20 @@ files = [
 six = ">=1.5"
 
 [[package]]
+name = "python-jwt"
+version = "4.1.0"
+description = "Module for generating and verifying JSON Web Tokens"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "python_jwt-4.1.0-py2.py3-none-any.whl", hash = "sha256:1f4d44b6b9176375489c0374c71f18f27f52524e689174e11dd39a801170c91b"},
+    {file = "python_jwt-4.1.0.tar.gz", hash = "sha256:f89af071d9bda4741bc80754bd1cfce73e434a2cbb7855086d8604a10bd3fdc5"},
+]
+
+[package.dependencies]
+jwcrypto = ">=1.4.2"
+
+[[package]]
 name = "pyyaml"
 version = "6.0.2"
 description = "YAML parser and emitter for Python"
@@ -1864,6 +1878,20 @@ files = [
 ]
 
 [[package]]
+name = "unique-names-generator"
+version = "1.0.2"
+description = "Generate unique and memorable name strings."
+optional = false
+python-versions = ">=3.6.0"
+files = [
+    {file = "unique-names-generator-1.0.2.tar.gz", hash = "sha256:1f8fcc95b27ae5f065b3df8ab62d5e749e9fd383ff7748607e63a10345248e7a"},
+    {file = "unique_names_generator-1.0.2-py2.py3-none-any.whl", hash = "sha256:ea3c7ba5e1d2926e82b183a306bbef924980b007fe7492a8f64b62b052de1b77"},
+]
+
+[package.extras]
+dev = ["coverage (==5.1)", "ipython (==7.14.0)", "pre-commit (==2.3.0)", "pytest (==5.4.1)", "pytest-mock (==3.1.0)"]
+
+[[package]]
 name = "uritemplate"
 version = "4.1.1"
 description = "Implementation of RFC 6570 URI Templates"
@@ -1927,4 +1955,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "5e126e584994fa9e8e8234d2db927562adf31c612cb2562a278adf931a19e7f7"
+content-hash = "e6bac75575ddd8d08e29194d8fa367a0db92a8c477c18d0a357704410ba4d16f"
