@@ -1,0 +1,9 @@
+react
+javascript
+typescript
+Nextjs
+remixjs
+mui
+tailwind
+css
+redux

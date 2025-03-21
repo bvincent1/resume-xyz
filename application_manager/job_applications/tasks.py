@@ -7,6 +7,6 @@ def clear_tokens():
 
     app = Application.objects.filter(
         status__exact=ApplicationStatus.objects.get(name__exact="todo").name
-    ).first()
+    ).last()
 
     # for p in app.list_prompts():
