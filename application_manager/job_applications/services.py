@@ -1,10 +1,13 @@
 import requests
 from unique_names_generator import get_random_name
 from unique_names_generator.data import ADJECTIVES, ANIMALS
+import boto3
+from botocore.config import Config
+import os
 
 
 class ResumeService:
-    host = "http://localhost:5173"
+    host = os.getenv("RESUME_SERVICE_HOST")
 
     def __init__(self, **kwargs):
         if kwargs.get("username") is None or kwargs.get("password") is None:
@@ -68,3 +71,25 @@ class ResumeService:
 
     def __del__(self):
         self.logout()
+
+
+class FileService:
+    def __init__(self, **kwargs):
+        self.client = boto3.client(
+            "s3",
+            region_name=os.getenv("STORAGE_SECRET_KEY"),
+            endpoint_url=f"http://{os.getenv("STORAGE_ENDPOINT")}:{os.getenv("STORAGE_PORT")}",
+            aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY"),
+            aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY"),
+            aws_session_token=None,
+            config=Config(signature_version="s3v4"),
+            verify=False,
+        )
+        self.bucket = kwargs.get("bucket", "default")
+
+    def open(self, file_path):
+        return (
+            self.client.get_object(Bucket=self.bucket, Key=file_path)["body"]
+            .read()
+            .decode("utf-8")
+        )

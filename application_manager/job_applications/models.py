@@ -1,26 +1,29 @@
 from django.db import models
-from jinja2 import Environment, PackageLoader, select_autoescape
+from jinja2 import Environment, BaseLoader
 import json
 from django.conf import settings
 import os
 
-from .services import ResumeService
+from .services import FileService, ResumeService
 
 PROJECT_DIR = settings.BASE_DIR.as_posix()
 
+
+class S3Loader(BaseLoader):
+    def get_source(self, env, template):
+        f = FileService()
+        return f.open(template)
+
+
 env = Environment(
-    loader=PackageLoader(
-        package_name="application_manager",
-        package_path=PROJECT_DIR + "/application_manager/templates",
-    ),
-    autoescape=select_autoescape(),
+    loader=S3Loader(),
 )
 
 job_histories = [
-    "/application_manager/supporting_documents/histories/tms.md",
-    "/application_manager/supporting_documents/histories/staffbase.md",
-    "/application_manager/supporting_documents/histories/bvs.md",
-    "/application_manager/supporting_documents/histories/10SPD.md",
+    "supporting_documents/histories/tms.md",
+    "supporting_documents/histories/staffbase.md",
+    "supporting_documents/histories/bvs.md",
+    "supporting_documents/histories/10SPD.md",
 ]
 
 skills_types = [
@@ -78,37 +81,38 @@ class Application(models.Model):
         self.generate_all_prompts()
 
     def generate_job_histories_prompts(self):
+        f = FileService()
         for doc in job_histories:
-            with open(PROJECT_DIR + doc, "r") as f:
-                name = doc.split("/")[-1]
-                try:
-                    p = self.get_prompt(name)
-                    p.description = env.get_template("job_blurb.md").render(
+            tasks_list = f.open(doc).split("\n")
+            name = doc.split("/")[-1]
+            try:
+                p = self.get_prompt(name)
+                p.description = env.get_template("templates/job_blurb.md").render(
+                    job_description=self.description,
+                    job_tasks_list=[l.strip() for l in tasks_list],
+                )
+                p.save()
+            except:
+                Prompt(
+                    description=env.get_template("templates/job_blurb.md").render(
                         job_description=self.description,
-                        job_tasks_list=[l.strip() for l in f.readlines()],
-                    )
-                    p.save()
-                except:
-                    Prompt(
-                        description=env.get_template("job_blurb.md").render(
-                            job_description=self.description,
-                            job_tasks_list=[l.strip() for l in f.readlines()],
-                        ),
-                        application=self,
-                        name=name,
-                    ).save()
+                        job_tasks_list=[l.strip() for l in tasks_list],
+                    ),
+                    application=self,
+                    name=name,
+                ).save()
 
     def generate_payload_prompt(self):
         try:
             p = self.get_prompt("csl")
-            p.description = env.get_template("csl.md").render(
+            p.description = env.get_template("templates/csl.md").render(
                 job_description=self.description,
             )
             p.save()
         except:
 
             Prompt(
-                description=env.get_template("csl.md").render(
+                description=env.get_template("templates/csl.md").render(
                     job_description=self.description,
                 ),
                 application=self,
@@ -119,14 +123,14 @@ class Application(models.Model):
         jobs = [open(PROJECT_DIR + h, "r").read() for h in job_histories]
         try:
             p = self.get_prompt("header")
-            p.description = env.get_template("resume_header.md").render(
+            p.description = env.get_template("templates/resume_header.md").render(
                 job_description=self.description,
                 job_histories=jobs,
             )
             p.save()
         except:
             Prompt(
-                description=env.get_template("resume_header.md").render(
+                description=env.get_template("templates/resume_header.md").render(
                     job_description=self.description,
                     job_histories=jobs,
                 ),
@@ -135,33 +139,31 @@ class Application(models.Model):
             ).save()
 
     def generate_skills_prompts(self):
+        f = FileService()
         for skill_type in skills_types:
-            with open(
-                PROJECT_DIR
-                + f"/application_manager/supporting_documents/{skill_type}_skills.md",
-                "r",
-            ) as fp:
-                skills_list = fp.readlines()
-                try:
-                    p = self.get_prompt(skill_type)
-                    p.description = env.get_template("skills_list.md").render(
+            skills_list = f.open(f"supporting_documents/{skill_type}_skills.md").split(
+                "\n"
+            )
+            try:
+                p = self.get_prompt(skill_type)
+                p.description = env.get_template("templates/skills_list.md").render(
+                    job_description=self.description,
+                    skill_type=skill_type,
+                    skills_list=skills_list,
+                    skill_count=4,
+                )
+                p.save()
+            except:
+                Prompt(
+                    description=env.get_template("templates/skills_list.md").render(
                         job_description=self.description,
                         skill_type=skill_type,
                         skills_list=skills_list,
                         skill_count=4,
-                    )
-                    p.save()
-                except:
-                    Prompt(
-                        description=env.get_template("skills_list.md").render(
-                            job_description=self.description,
-                            skill_type=skill_type,
-                            skills_list=skills_list,
-                            skill_count=4,
-                        ),
-                        application=self,
-                        name=skill_type,
-                    ).save()
+                    ),
+                    application=self,
+                    name=skill_type,
+                ).save()
 
     def list_prompts(self):
         return [
@@ -178,42 +180,41 @@ class Application(models.Model):
         return self.prompts.get(name__exact=name)
 
     def build_pdf(self):
-        with open(PROJECT_DIR + "/../resume.json", "r") as fp:
-            resume = json.load(fp)
-            resume["basics"]["payload"] = env.get_template("payload.html").render(
-                csl=self.get_prompt("csl").response,
-            )
-            resume["sections"]["summary"][
-                "content"
-            ] = f"<p>{self.get_prompt("header"
+        f = FileService()
+        resume = json.loads(f.open("resume.json"))
+        resume["basics"]["payload"] = env.get_template("templates/payload.html").render(
+            csl=self.get_prompt("csl").response,
+        )
+        resume["sections"]["summary"][
+            "content"
+        ] = f"<p>{self.get_prompt("header"
+        ).response}</p>"
+
+        for i in range(len(job_histories)):
+            resume["sections"]["experience"]["items"][i][
+                "summary"
+            ] = f"<p>{self.get_prompt(
+                job_histories[i].split("/")[-1]
             ).response}</p>"
 
-            for i in range(len(job_histories)):
-                resume["sections"]["experience"]["items"][i][
-                    "summary"
-                ] = f"<p>{self.get_prompt(
-                    job_histories[i].split("/")[-1]
-                ).response}</p>"
+        for i in range(len(skills_types)):
+            resume["sections"]["skills"]["items"][i]["keywords"] = [
+                k.strip() for k in self.get_prompt(skills_types[i]).response.split(",")
+            ]
 
-            for i in range(len(skills_types)):
-                resume["sections"]["skills"]["items"][i]["keywords"] = [
-                    k.strip()
-                    for k in self.get_prompt(skills_types[i]).response.split(",")
-                ]
+        rs = ResumeService(
+            username=os.getenv("RESUME_USERNAME"),
+            password=os.getenv("RESUME_PASSWORD"),
+        )
 
-            rs = ResumeService(
-                username=os.getenv("RESUME_USERNAME"),
-                password=os.getenv("RESUME_PASSWORD"),
-            )
+        if self.resume_id is None:
+            self.resume_id = rs.create()
 
-            if self.resume_id is None:
-                self.resume_id = rs.create()
+        rs.update(self.resume_id, resume)
+        self.resume_url = rs.get_pdf_url(self.resume_id)
+        self.save()
 
-            rs.update(self.resume_id, resume)
-            self.resume_url = rs.get_pdf_url(self.resume_id)
-            self.save()
-
-            return self.resume_url
+        return self.resume_url
 
 
 class Prompt(models.Model):
@@ -235,6 +236,7 @@ class Prompt(models.Model):
         return f"{self.application.title} -> {self.name}"
 
     def get_trimmed_response(self):
+        # used in the admin dashboard table
         if self.response is not None:
             return self.response[:10]
         return ""

@@ -32,6 +32,8 @@ jinja2 = "^3.1.6"
 python-jwt = "^4.1.0"
 requests = "^2.32.3"
 unique-names-generator = "^1.0.2"
+python-benedict = {extras = ["all"], version = "^0.34.1"}
+boto3 = "^1.37.18"
 
 
 [tool.poetry.group.dev.dependencies]
