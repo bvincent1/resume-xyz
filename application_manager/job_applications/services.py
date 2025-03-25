@@ -77,8 +77,8 @@ class FileService:
     def __init__(self, **kwargs):
         self.client = boto3.client(
             "s3",
-            region_name=os.getenv("STORAGE_SECRET_KEY"),
-            endpoint_url=f"http://{os.getenv("STORAGE_ENDPOINT")}:{os.getenv("STORAGE_PORT")}",
+            endpoint_url=os.getenv("STORAGE_HOST"),
+            region_name=os.getenv("STORAGE_REGION"),
             aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY"),
             aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY"),
             aws_session_token=None,

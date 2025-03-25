@@ -1,18 +1,14 @@
 from django.db import models
 from jinja2 import Environment, BaseLoader
 import json
-from django.conf import settings
 import os
 
 from .services import FileService, ResumeService
 
-PROJECT_DIR = settings.BASE_DIR.as_posix()
-
 
 class S3Loader(BaseLoader):
     def get_source(self, env, template):
-        f = FileService()
-        return f.open(template)
+        return FileService().open(template)
 
 
 env = Environment(
@@ -120,7 +116,8 @@ class Application(models.Model):
             ).save()
 
     def generate_header_prompt(self):
-        jobs = [open(PROJECT_DIR + h, "r").read() for h in job_histories]
+        f = FileService()
+        jobs = [f.open(h) for h in job_histories]
         try:
             p = self.get_prompt("header")
             p.description = env.get_template("templates/resume_header.md").render(
