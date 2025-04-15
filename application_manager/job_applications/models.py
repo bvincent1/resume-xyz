@@ -2,13 +2,18 @@ from django.db import models
 from jinja2 import Environment, BaseLoader
 import json
 import os
+from os.path import join, exists, getmtime
 
 from .services import FileService, ResumeService
 
 
 class S3Loader(BaseLoader):
     def get_source(self, env, template):
-        return FileService().open(template)
+        return (
+            FileService().open(template),
+            template,
+            lambda: False,
+        )
 
 
 env = Environment(
@@ -79,20 +84,20 @@ class Application(models.Model):
     def generate_job_histories_prompts(self):
         f = FileService()
         for doc in job_histories:
-            tasks_list = f.open(doc).split("\n")
+            tasks_list = f.open(doc)
             name = doc.split("/")[-1]
             try:
                 p = self.get_prompt(name)
                 p.description = env.get_template("templates/job_blurb.md").render(
                     job_description=self.description,
-                    job_tasks_list=[l.strip() for l in tasks_list],
+                    job_tasks_list=tasks_list,
                 )
                 p.save()
             except:
                 Prompt(
                     description=env.get_template("templates/job_blurb.md").render(
                         job_description=self.description,
-                        job_tasks_list=[l.strip() for l in tasks_list],
+                        job_tasks_list=tasks_list,
                     ),
                     application=self,
                     name=name,
@@ -138,16 +143,13 @@ class Application(models.Model):
     def generate_skills_prompts(self):
         f = FileService()
         for skill_type in skills_types:
-            skills_list = f.open(f"supporting_documents/{skill_type}_skills.md").split(
-                "\n"
-            )
+            skills_list = f.open(f"supporting_documents/{skill_type}_skills.md")
             try:
                 p = self.get_prompt(skill_type)
                 p.description = env.get_template("templates/skills_list.md").render(
                     job_description=self.description,
                     skill_type=skill_type,
                     skills_list=skills_list,
-                    skill_count=4,
                 )
                 p.save()
             except:
@@ -211,7 +213,7 @@ class Application(models.Model):
         self.resume_url = rs.get_pdf_url(self.resume_id)
         self.save()
 
-        return self.resume_url
+        return f"{self.company} - {self.resume_url}"
 
 
 class Prompt(models.Model):

@@ -29,8 +29,16 @@ class ApplicationAdmin(admin.ModelAdmin):
         ),
     ]
 
+    actions = ["generate_pdfs"]
+
     def prompts(self, app):
         return "\n".join(app.list_prompts())
+
+    @admin.action(description="build pdfs")
+    def generate_pdfs(self, request, queryset):
+        for application in queryset:
+            application.build_pdf()
+        self.message_user(request, "PDFs generated successfully.")
 
 
 class PromptAdmin(admin.ModelAdmin):

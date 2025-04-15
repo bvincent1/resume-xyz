@@ -1,10 +1,11 @@
 Given this list of all my {{ skill_type }} skills:
 """
-{% for skill in skills_list %}
-{{-skill-}}
-{%- endfor %}"""
+{{ skills_list }}
+"""
 
-pick the {{ skill_count }} most relevant as a comma separated list for the following job description:
+and this job description
 """
 {{ job_description }}
 """
+
+pick the 4 most relevant skills, and list ONLY those 4 skills as a COMMA SEPARATED LIST

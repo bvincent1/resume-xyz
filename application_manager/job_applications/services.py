@@ -29,7 +29,7 @@ class ResumeService:
             )
         )[0].replace("Authentication=", "")
 
-    def get_session_headers(self):
+    def _get_session_headers(self):
         return {"Cookie": f"Authentication={self.auth_token}; "}
 
     def create(self):
@@ -41,32 +41,35 @@ class ResumeService:
                 "title": name.replace("-", ""),
                 "visibility": "private",
             },
-            headers=self.get_session_headers(),
+            headers=self._get_session_headers(),
         )
         return r.json()["id"]
 
-    def update(self, id, data):
+    def update(self, id: str, data: dict):
         requests.patch(
             f"{ResumeService.host}/api/resume/{id}",
             json={"data": data},
-            headers=self.get_session_headers(),
+            headers=self._get_session_headers(),
         )
 
-    def get_pdf_url(self, id):
-        r = requests.get(
-            f"{ResumeService.host}/api/resume/print/{id}",
-            headers=self.get_session_headers(),
-        )
-        return r.json()["url"]
+    def get_pdf_url(self, id: str) -> str | None:
+        try:
+            r = requests.get(
+                f"{ResumeService.host}/api/resume/print/{id}",
+                headers=self._get_session_headers(),
+            )
+            return r.json()["url"]
+        except KeyError:
+            return None
 
-    def delete(self, id):
+    def delete(self, id: str):
         requests.delete(
-            f"{ResumeService.host}/api/resume/{id}", headers=self.get_session_headers()
+            f"{ResumeService.host}/api/resume/{id}", headers=self._get_session_headers()
         )
 
     def logout(self):
         requests.post(
-            f"{ResumeService.host}/api/auth/logout", headers=self.get_session_headers()
+            f"{ResumeService.host}/api/auth/logout", headers=self._get_session_headers()
         )
 
     def __del__(self):
@@ -89,7 +92,7 @@ class FileService:
 
     def open(self, file_path):
         return (
-            self.client.get_object(Bucket=self.bucket, Key=file_path)["body"]
+            self.client.get_object(Bucket=self.bucket, Key=file_path)["Body"]
             .read()
             .decode("utf-8")
         )

@@ -44,6 +44,10 @@ worker:
 	@poetry run celery -A django_api worker -l INFO
 .PHONY: worker
 
-generate_pdfs:
+pdfs:
 	@$(DJANGO) generate_pdfs
-.PHONY: generate_pdfs
+.PHONY: pdfs
+
+prompts:
+	@$(DJANGO) regen_prompts
+.PHONY: prompts

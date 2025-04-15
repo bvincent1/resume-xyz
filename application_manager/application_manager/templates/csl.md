@@ -3,4 +3,4 @@ Given the following job description:
 {{ job_description }}
 """
 
-generate a comma separated list of keywords
+generate ONLY a COMMA SEPARATED LIST of it's keywords
