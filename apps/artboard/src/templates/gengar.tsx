@@ -616,7 +616,7 @@ export const Gengar = ({ columns, isFirstPage = false }: TemplateProps) => {
             <Fragment key={section}>{mapSectionToComponent(section)}</Fragment>
           ))}
         </div>
-        <div style={payloadStyling}>{payload}</div>
+        <div style={payloadStyling as React.CSSProperties}>{payload}</div>
       </div>
     </div>
   );

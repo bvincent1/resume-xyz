@@ -23,7 +23,7 @@ seed: migrations
 .PHONY: seed
 
 dev:
-	@$(DJANGO) runserver
+	@$(DJANGO) runserver 0.0.0.0:9099
 .PHONY: dev
 
 shell:
@@ -51,3 +51,8 @@ pdfs:
 prompts:
 	@$(DJANGO) regen_prompts
 .PHONY: prompts
+
+
+dumpdata:
+	@$(DJANGO) dumpdata -o mydata.json.gz
+.PHONY: dumpdata

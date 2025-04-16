@@ -30,8 +30,7 @@ SECRET_KEY = "django-insecure-=n^w3y51k58$-p&mu36rc(*s#ia_%w$h0yj4$h+s0*=!u&5b3z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -77,6 +76,8 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "application_manager.wsgi.application"
+
+CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
 
 
 # Database
