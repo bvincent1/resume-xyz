@@ -53,3 +53,5 @@ apps/client/src/locales/*/messages.mjs
 
 
 nohup.out
+
+__pycache__
