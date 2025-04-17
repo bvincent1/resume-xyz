@@ -7,14 +7,15 @@ import os
 
 
 class ResumeService:
-    host = os.getenv("RESUME_SERVICE_HOST")
 
     def __init__(self, **kwargs):
+        self.host = os.getenv("RESUME_SERVICE_HOST")
+
         if kwargs.get("username") is None or kwargs.get("password") is None:
             raise ValueError("Missing username or password")
 
         r = requests.post(
-            f"{ResumeService.host}/api/auth/login",
+            f"{self.host}/api/auth/login",
             json={
                 "identifier": kwargs.get("username"),
                 "password": kwargs.get("password"),
@@ -35,7 +36,7 @@ class ResumeService:
     def create(self):
         name = get_random_name(combo=[ADJECTIVES, ADJECTIVES, ANIMALS], separator="-")
         r = requests.post(
-            f"{ResumeService.host}/api/resume",
+            f"{self.host}/api/resume",
             json={
                 "slug": name.lower(),
                 "title": name.replace("-", ""),
@@ -47,7 +48,7 @@ class ResumeService:
 
     def update(self, id: str, data: dict):
         requests.patch(
-            f"{ResumeService.host}/api/resume/{id}",
+            f"{self.host}/api/resume/{id}",
             json={"data": data},
             headers=self._get_session_headers(),
         )
@@ -55,7 +56,7 @@ class ResumeService:
     def get_pdf_url(self, id: str) -> str | None:
         try:
             r = requests.get(
-                f"{ResumeService.host}/api/resume/print/{id}",
+                f"{self.host}/api/resume/print/{id}",
                 headers=self._get_session_headers(),
             )
             return r.json()["url"]
@@ -64,12 +65,12 @@ class ResumeService:
 
     def delete(self, id: str):
         requests.delete(
-            f"{ResumeService.host}/api/resume/{id}", headers=self._get_session_headers()
+            f"{self.host}/api/resume/{id}", headers=self._get_session_headers()
         )
 
     def logout(self):
         requests.post(
-            f"{ResumeService.host}/api/auth/logout", headers=self._get_session_headers()
+            f"{self.host}/api/auth/logout", headers=self._get_session_headers()
         )
 
     def __del__(self):
