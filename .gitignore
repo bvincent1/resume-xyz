@@ -52,6 +52,6 @@ apps/client/src/locales/_build/
 apps/client/src/locales/*/messages.mjs
 
 
-nohup.out
+__pycache__/
 
-__pycache__
+nohup.out
