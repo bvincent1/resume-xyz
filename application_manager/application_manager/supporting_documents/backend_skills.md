@@ -11,4 +11,4 @@ rebac
 flask
 microservices
 serverless
-event driven
+ddd

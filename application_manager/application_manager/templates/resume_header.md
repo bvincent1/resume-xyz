@@ -11,4 +11,4 @@ and the following job histories:
 """
 {%- endfor %}
 
-write a few sentences summarizing my work experience and why I'm perfect for this position keeping it under 4 sentences
+write a few sentences summarizing my work experience and why I'm perfect for this position, keeping it under 4 sentences
