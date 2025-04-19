@@ -29,7 +29,7 @@ class ApplicationAdmin(admin.ModelAdmin):
         ),
     ]
 
-    actions = ["generate_pdfs"]
+    actions = ["generate_pdfs", "regenerate_prompts"]
 
     def prompts(self, app):
         return "\n".join(app.list_prompts())
