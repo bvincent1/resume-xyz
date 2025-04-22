@@ -111,7 +111,6 @@ class Application(models.Model):
             )
             p.save()
         except:
-
             Prompt(
                 description=env.get_template("templates/csl.md").render(
                     job_description=self.description,
@@ -164,6 +163,24 @@ class Application(models.Model):
                     name=skill_type,
                 ).save()
 
+    def generate_job_name_prompt(self):
+        prompt_name = "job_name"
+        prompt_template = "templates/job_name.md"
+        try:
+            p = self.get_prompt(prompt_name)
+            p.description = env.get_template(prompt_template).render(
+                job_description=self.description,
+            )
+            p.save()
+        except:
+            Prompt(
+                description=env.get_template(prompt_template).render(
+                    job_description=self.description,
+                ),
+                application=self,
+                name=prompt_name,
+            ).save()
+
     def list_prompts(self):
         return [
             f"{p.name} >\n{p.description}\n{p.response}\n" for p in self.prompts.all()
@@ -174,6 +191,7 @@ class Application(models.Model):
         self.generate_payload_prompt()
         self.generate_header_prompt()
         self.generate_skills_prompts()
+        self.generate_job_name_prompt()
 
     def get_prompt(self, name):
         return self.prompts.get(name__exact=name)
@@ -188,6 +206,14 @@ class Application(models.Model):
             "content"
         ] = f"<p>{self.get_prompt("header"
         ).response}</p>"
+
+        # job name section
+        resume["sections"]["experience"]["items"][0]["position"] = self.get_prompt(
+            "job_name"
+        )
+        resume["sections"]["experience"]["items"][1]["position"] = self.get_prompt(
+            "job_name"
+        )
 
         for i in range(len(job_histories)):
             resume["sections"]["experience"]["items"][i][
