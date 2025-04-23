@@ -210,10 +210,10 @@ class Application(models.Model):
         # job name section
         resume["sections"]["experience"]["items"][0]["position"] = self.get_prompt(
             "job_name"
-        )
+        ).response
         resume["sections"]["experience"]["items"][1]["position"] = self.get_prompt(
             "job_name"
-        )
+        ).response
 
         for i in range(len(job_histories)):
             resume["sections"]["experience"]["items"][i][
