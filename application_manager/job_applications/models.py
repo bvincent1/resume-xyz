@@ -258,7 +258,7 @@ class Prompt(models.Model):
 
     def __str__(self):
         print(self.application)
-        return f"{self.application.title} -> {self.name}"
+        return f"{self.application.company} -> {self.name}"
 
     def get_trimmed_response(self):
         # used in the admin dashboard table

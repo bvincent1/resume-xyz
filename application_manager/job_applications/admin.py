@@ -68,7 +68,12 @@ class ApplicationAdmin(ModelAdmin):
 
 class PromptAdmin(ModelAdmin):
     model = Prompt
+
+    list_filter_submit = True  # Submit button at the bottom of the filter
     list_display = ("__str__", "get_trimmed_response")
+    list_filter = [
+        ("application__company", FieldTextFilter),
+    ]
 
     fieldsets = [
         (
