@@ -2,7 +2,7 @@ from django.db import models
 from jinja2 import Environment, BaseLoader
 import json
 import os
-from os.path import join, exists, getmtime
+import base64
 
 from .services import FileService, ResumeService
 
@@ -198,9 +198,17 @@ class Application(models.Model):
 
     def build_pdf(self):
         f = FileService()
+        api_url = (
+            "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time"
+        )
         resume = json.loads(f.open("resume.json"))
+        breakout = env.get_template("templates/breakout.md").render(
+            url=f"{api_url}?company_name={self.company}&method=url",
+            base_64_url=f"{base64.b64encode(f"{api_url}?company_name={self.company}&method=base64".encode("ascii")).decode("ascii")}",
+        )
         resume["basics"]["payload"] = env.get_template("templates/payload.html").render(
             csl=self.get_prompt("csl").response,
+            breakout=breakout,
         )
         resume["sections"]["summary"][
             "content"
@@ -214,6 +222,26 @@ class Application(models.Model):
         resume["sections"]["experience"]["items"][1]["position"] = self.get_prompt(
             "job_name"
         ).response
+
+        ## link section
+
+        # redirect_map = {
+        #     "8d5fa094-0fa1-483a-902f-daf7f6b6ae7d": "https://www.linkedin.com/in/vincent-slashsolve/",
+        #     "8487a51c-7951-4e81-b5be-88ea49c7a4c8": "https://github.com/bvincent1",
+        #     "02b8c42f-f373-4f0d-8032-54d56f9121a9": "https://gitlab.com/bvincent1",
+        #     "dd181207-feaa-4770-956a-6f5dc9778bfc": "mailto:benjc.vincent@gmail.com",
+        # }
+
+        resume["sections"]["profiles"]["items"][0]["url"][
+            "href"
+        ] = f"{api_url}?company_name={self.company}&redirect=8d5fa094-0fa1-483a-902f-daf7f6b6ae7d"
+
+        resume["sections"]["profiles"]["items"][1]["url"][
+            "href"
+        ] = f"{api_url}?company_name={self.company}&redirect=8487a51c-7951-4e81-b5be-88ea49c7a4c8"
+        resume["sections"]["profiles"]["items"][2]["url"][
+            "href"
+        ] = f"{api_url}?company_name={self.company}&redirect=02b8c42f-f373-4f0d-8032-54d56f9121a9"
 
         for i in range(len(job_histories)):
             resume["sections"]["experience"]["items"][i][
