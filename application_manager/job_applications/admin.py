@@ -1,11 +1,14 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin
+from django.core.validators import EMPTY_VALUES
+from unfold.contrib.filters.admin import FieldTextFilter, RelatedCheckboxFilter
 
 from .models import ApplicationStatus, Application, Prompt
 
 
-class ApplicationAdmin(admin.ModelAdmin):
+class ApplicationAdmin(ModelAdmin):
     model = Application
-    readonly_fields = ("prompts",)
+    readonly_fields = ("prompts", "created", "updated")
     fieldsets = [
         (
             None,
@@ -21,12 +24,28 @@ class ApplicationAdmin(admin.ModelAdmin):
             },
         ),
         (
+            None,
+            {
+                "fields": (
+                    "created",
+                    "updated",
+                )
+            },
+        ),
+        (
             "Additional information",
             {
                 "classes": ["collapse"],
                 "fields": ["prompts"],
             },
         ),
+    ]
+
+    list_filter_submit = True  # Submit button at the bottom of the filter
+    list_filter = [
+        ("company", FieldTextFilter),
+        ("title", FieldTextFilter),
+        ("status", RelatedCheckboxFilter),
     ]
 
     actions = ["generate_pdfs", "regenerate_prompts"]
@@ -47,12 +66,30 @@ class ApplicationAdmin(admin.ModelAdmin):
         self.message_user(request, "Prompts regenerated successfully.")
 
 
-class PromptAdmin(admin.ModelAdmin):
+class PromptAdmin(ModelAdmin):
     model = Prompt
     list_display = ("__str__", "get_trimmed_response")
 
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": (
+                    "application",
+                    "name",
+                    "description",
+                    "response",
+                ),
+            },
+        ),
+    ]
 
-admin.site.register(ApplicationStatus)
+
+class StatusAdmin(ModelAdmin):
+    pass
+
+
+admin.site.register(ApplicationStatus, StatusAdmin)
 admin.site.register(Application, ApplicationAdmin)
 admin.site.register(Prompt, PromptAdmin)
 # Register your models here.

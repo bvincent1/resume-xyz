@@ -34,6 +34,7 @@ requests = "^2.32.3"
 unique-names-generator = "^1.0.2"
 python-benedict = {extras = ["all"], version = "^0.34.1"}
 boto3 = "^1.37.18"
+django-unfold = "^0.55.3"
 
 
 [tool.poetry.group.dev.dependencies]

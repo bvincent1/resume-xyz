@@ -56,3 +56,9 @@ prompts:
 dumpdata:
 	@$(DJANGO) dumpdata -o mydata.json.gz
 .PHONY: dumpdata
+
+
+prod:
+	@echo "" > nohup.out
+	@nohup $(DJANGO) runserver 0.0.0.0:9099 &
+.PHONY: prod
