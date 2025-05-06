@@ -6,18 +6,19 @@ import { Link, matchRoutes, Outlet, useLocation } from "react-router-dom";
 import { LocaleSwitch } from "@/client/components/locale-switch";
 import { Logo } from "@/client/components/logo";
 import { ThemeSwitch } from "@/client/components/theme-switch";
-import { useAuthProviders } from "@/client/services/auth/providers";
 
+// import { useAuthProviders } from "@/client/services/auth/providers";
 import { SocialAuth } from "./_components/social-auth";
 
 const authRoutes = [{ path: "/auth/login" }, { path: "/auth/register" }];
 
 export const AuthLayout = () => {
   const location = useLocation();
-  const { providers } = useAuthProviders();
+  // const { providers } = useAuthProviders();
   const isAuthRoute = useMemo(() => matchRoutes(authRoutes, location) !== null, [location]);
 
-  if (!providers) return null;
+  // if (!providers) return null;
+  const providers = ["email"];
 
   // Condition (providers.length === 1) hides the divider if providers[] includes only "email"
   const hideDivider = !providers.includes("email") || providers.length === 1;

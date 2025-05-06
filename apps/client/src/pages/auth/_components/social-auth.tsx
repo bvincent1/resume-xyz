@@ -1,6 +1,6 @@
-import { t } from "@lingui/macro";
-import { GithubLogo, GoogleLogo } from "@phosphor-icons/react";
-import { Button } from "@reactive-resume/ui";
+// import { t } from "@lingui/macro";
+// import { GithubLogo, GoogleLogo } from "@phosphor-icons/react";
+// import { Button } from "@reactive-resume/ui";
 
 import { useAuthProviders } from "@/client/services/auth/providers";
 
@@ -11,7 +11,7 @@ export const SocialAuth = () => {
 
   return (
     <div className="grid grid-cols-2 gap-4">
-      {providers.includes("github") && (
+      {/* {providers.includes("github") && (
         <Button asChild size="lg" className="w-full !bg-[#222] !text-white hover:!bg-[#222]/80">
           <a href="/api/auth/github">
             <GithubLogo className="mr-3 size-4" />
@@ -31,7 +31,7 @@ export const SocialAuth = () => {
             {t`Google`}
           </a>
         </Button>
-      )}
+      )} */}
     </div>
   );
 };
