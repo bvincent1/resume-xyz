@@ -342,3 +342,22 @@ class Prompt(models.Model):
         #     self.application.save()
 
 
+class URLStatus(models.Model):
+    name = models.CharField(blank=False, null=False)
+
+    def __str__(self):
+        return self.name
+
+
+class JobURL(models.Model):
+    url = models.URLField(unique=True, blank=False, null=False)
+    status = models.ForeignKey(
+        URLStatus,
+        null=False,
+        blank=False,
+        on_delete=models.PROTECT,
+        default=URLStatus.objects.get(name="todo"),
+    )
+
+    def __str__(self):
+        return f"{self.status}-{self.url}"

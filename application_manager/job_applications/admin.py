@@ -1,9 +1,13 @@
+from json import loads
+import pprint
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 from django.core.validators import EMPTY_VALUES
 from unfold.contrib.filters.admin import FieldTextFilter, RelatedCheckboxFilter
+from django.apps import apps
+from subprocess import run, PIPE
 
-from .models import ApplicationStatus, Application, Prompt
+from .models import ApplicationStatus, Application, JobURL, Prompt, URLStatus
 
 
 class ApplicationAdmin(ModelAdmin):

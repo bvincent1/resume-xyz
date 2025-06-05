@@ -1,12 +1,22 @@
+from subprocess import call
 from celery import shared_task
+from django.apps import apps
 
 
 @shared_task
-def clear_tokens():
+def fill_in_prompts():
     from .models import Application, ApplicationStatus
 
     app = Application.objects.filter(
         status__exact=ApplicationStatus.objects.get(name__exact="todo").name
     ).last()
+    for prompt in app.prompts.all():
+        if prompt.response is not None:
+            print(prompt.description)
+    app.status = ApplicationStatus.objects.get(name__exact="ready")
+    app.save()
 
-    # for p in app.list_prompts():
+
+@shared_task
+def backup_to_file():
+    call(["make", "backup"], cwd=apps.get_app_config("app_label").path)
