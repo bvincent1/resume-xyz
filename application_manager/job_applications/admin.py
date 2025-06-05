@@ -20,6 +20,7 @@ class ApplicationAdmin(ModelAdmin):
                     "description",
                     "status",
                     "resume_url",
+                    "notes",
                 ),
             },
         ),
@@ -30,13 +31,6 @@ class ApplicationAdmin(ModelAdmin):
                     "created",
                     "updated",
                 )
-            },
-        ),
-        (
-            "Additional information",
-            {
-                "classes": ["collapse"],
-                "fields": ["prompts"],
             },
         ),
     ]
@@ -94,7 +88,31 @@ class StatusAdmin(ModelAdmin):
     pass
 
 
+class URLStatusAdmin(ModelAdmin):
+    pass
+
+
+class JobURLAdmin(ModelAdmin):
+    @admin.action(description="Get job info")
+    def get_job_info(self, request, queryset):
+        urls_string = ",".join([url.url for url in queryset])
+        result = run(
+            ["node", "../scraper/src/getJobInfo.mjs", urls_string],
+            cwd=apps.get_app_config("app_label").path,
+            stderr=PIPE,
+            stdout=PIPE,
+            text=True,
+        )
+        if result.returncode == 0:
+            job_infos = loads(result.stdout)
+            pprint(job_infos)
+
+        self.message_user(request, "Prompts regenerated successfully.")
+
+
+# Register your models here.
 admin.site.register(ApplicationStatus, StatusAdmin)
 admin.site.register(Application, ApplicationAdmin)
 admin.site.register(Prompt, PromptAdmin)
-# Register your models here.
+admin.site.register(URLStatus, URLStatusAdmin)
+admin.site.register(JobURL, JobURLAdmin)

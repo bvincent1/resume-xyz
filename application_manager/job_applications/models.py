@@ -3,6 +3,7 @@ from jinja2 import Environment, BaseLoader
 import json
 import os
 import base64
+from urllib.parse import urlencode
 
 from .services import FileService, ResumeService
 
@@ -68,6 +69,7 @@ class Application(models.Model):
 
     created = models.DateTimeField(null=False, auto_now_add=True)
     updated = models.DateTimeField(null=False, auto_now=True)
+    notes = models.TextField(null=True, blank=True)
 
     class Meta:
         ordering = ["-id"]
@@ -194,7 +196,11 @@ class Application(models.Model):
         self.generate_job_name_prompt()
 
     def get_prompt(self, name):
-        return self.prompts.get(name__exact=name)
+        try:
+            return self.prompts.get(name__exact=name)
+        except:
+            print(name)
+            raise Exception(f"prompt error trying to get: {name}")
 
     def build_pdf(self):
         f = FileService()
@@ -203,8 +209,8 @@ class Application(models.Model):
         )
         resume = json.loads(f.open("resume.json"))
         breakout = env.get_template("templates/breakout.md").render(
-            url=f"{api_url}?company_name={self.company}&method=url",
-            base_64_url=f"{base64.b64encode(f"{api_url}?company_name={self.company}&method=base64".encode("ascii")).decode("ascii")}",
+            url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
+            base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
         )
         resume["basics"]["payload"] = env.get_template("templates/payload.html").render(
             csl=self.get_prompt("csl").response,
@@ -216,32 +222,54 @@ class Application(models.Model):
         ).response}</p>"
 
         # job name section
-        resume["sections"]["experience"]["items"][0]["position"] = self.get_prompt(
-            "job_name"
-        ).response
-        resume["sections"]["experience"]["items"][1]["position"] = self.get_prompt(
-            "job_name"
-        ).response
+        job_name_array = self.get_prompt("job_name").response.split(",")
+
+        resume["sections"]["experience"]["items"][0]["position"] = job_name_array[0]
+
+        if len(job_name_array) >= 2 and job_name_array[1]:
+            resume["sections"]["experience"]["items"][1]["position"] = job_name_array[1]
+        # default to copying entry #0
+        else:
+            resume["sections"]["experience"]["items"][1]["position"] = job_name_array[0]
+
+        if len(job_name_array) >= 3 and job_name_array[2]:
+            resume["sections"]["experience"]["items"][2]["position"] = job_name_array[2]
+
+        if len(job_name_array) >= 4 and job_name_array[3]:
+            resume["sections"]["experience"]["items"][3]["position"] = job_name_array[3]
+
+        if len(job_name_array) >= 5 and job_name_array[4]:
+            resume["sections"]["experience"]["items"][4]["position"] = job_name_array[4]
 
         ## link section
 
         # redirect_map = {
-        #     "8d5fa094-0fa1-483a-902f-daf7f6b6ae7d": "https://www.linkedin.com/in/vincent-slashsolve/",
-        #     "8487a51c-7951-4e81-b5be-88ea49c7a4c8": "https://github.com/bvincent1",
-        #     "02b8c42f-f373-4f0d-8032-54d56f9121a9": "https://gitlab.com/bvincent1",
-        #     "dd181207-feaa-4770-956a-6f5dc9778bfc": "mailto:benjc.vincent@gmail.com",
-        # }
+        #     '8d5fa094-0fa1-483a-902f-daf7f6b6ae7d': 'https://www.linkedin.com/in/vincent-slashsolve/',
+        #     '8487a51c-7951-4e81-b5be-88ea49c7a4c8': 'https://github.com/bvincent1',
+        #     '02b8c42f-f373-4f0d-8032-54d56f9121a9': 'https://gitlab.com/bvincent1',
+        #     'e2fb9fdc-d30b-4f5e-bc9a-49998b722a3e': 'https://www.coursera.org/account/accomplishments/records/B3UH5Y6FNWKA'
+        #   }
+
+        github_url = "https://github.deuterium.dev"
+        gitlab_url = "https://gitlab.deuterium.dev"
+        linkedin_url = "https://linkedin.deuterium.dev"
+        coursera_url = "https://coursera.deuterium.dev"
 
         resume["sections"]["profiles"]["items"][0]["url"][
             "href"
-        ] = f"{api_url}?company_name={self.company}&redirect=8d5fa094-0fa1-483a-902f-daf7f6b6ae7d"
-
+        ] = f"{linkedin_url}?{urlencode({'company': self.company })}"
+        
         resume["sections"]["profiles"]["items"][1]["url"][
             "href"
-        ] = f"{api_url}?company_name={self.company}&redirect=8487a51c-7951-4e81-b5be-88ea49c7a4c8"
+        ] = f"{github_url}?{urlencode({'company': self.company })}"
+
         resume["sections"]["profiles"]["items"][2]["url"][
             "href"
-        ] = f"{api_url}?company_name={self.company}&redirect=02b8c42f-f373-4f0d-8032-54d56f9121a9"
+        ] = f"{gitlab_url}?{urlencode({'company': self.company })}"
+
+        resume["sections"]["certifications"]["items"][0]["url"][
+            "href"
+        ] = f"{coursera_url}?{urlencode({'company': self.company })}"
 
         for i in range(len(job_histories)):
             resume["sections"]["experience"]["items"][i][
@@ -252,7 +280,8 @@ class Application(models.Model):
 
         for i in range(len(skills_types)):
             resume["sections"]["skills"]["items"][i]["keywords"] = [
-                k.strip() for k in self.get_prompt(skills_types[i]).response.split(",")
+                k.strip()
+                for k in (self.get_prompt(skills_types[i]).response or "").split(",")
             ]
 
         rs = ResumeService(
@@ -265,9 +294,18 @@ class Application(models.Model):
 
         rs.update(self.resume_id, resume)
         self.resume_url = rs.get_pdf_url(self.resume_id)
+        print(self.resume_id, self.resume_url)
         self.save()
 
         return f"{self.company} - {self.resume_url}"
+
+    def delete(self):
+        rs = ResumeService(
+            username=os.getenv("RESUME_USERNAME"),
+            password=os.getenv("RESUME_PASSWORD"),
+        )
+        rs.delete(self.resume_id)
+        return super().delete()
 
 
 class Prompt(models.Model):
@@ -293,3 +331,14 @@ class Prompt(models.Model):
         if self.response is not None:
             return self.response[:10]
         return ""
+
+    def save(self, **kwargs):
+        super().save(**kwargs)
+        # application_prompts = self.application.prompts.all()
+        # if len(application_prompts) == len(
+        #     [a for a in application_prompts if a.response != None]
+        # ):
+        #     self.application.status = ApplicationStatus.objects.get(name="ready")
+        #     self.application.save()
+
+
