@@ -190,16 +190,15 @@ class Application(models.Model):
 
     def generate_all_prompts(self):
         self.generate_job_histories_prompts()
-        self.generate_payload_prompt()
         self.generate_header_prompt()
         self.generate_skills_prompts()
+        self.generate_payload_prompt()
         self.generate_job_name_prompt()
 
     def get_prompt(self, name):
         try:
             return self.prompts.get(name__exact=name)
         except:
-            print(name)
             raise Exception(f"prompt error trying to get: {name}")
 
     def build_pdf(self):
@@ -255,21 +254,26 @@ class Application(models.Model):
         linkedin_url = "https://linkedin.deuterium.dev"
         coursera_url = "https://coursera.deuterium.dev"
 
+        query_params = urlencode(
+            {"company": self.company, "method": "resume", "app": self.pk}
+        )
         resume["sections"]["profiles"]["items"][0]["url"][
             "href"
-        ] = f"{linkedin_url}?{urlencode({'company': self.company })}"
-        
+        ] = f"{linkedin_url}?{query_params}"
+
         resume["sections"]["profiles"]["items"][1]["url"][
             "href"
-        ] = f"{github_url}?{urlencode({'company': self.company })}"
+        ] = f"{github_url}?{query_params}"
 
         resume["sections"]["profiles"]["items"][2]["url"][
             "href"
-        ] = f"{gitlab_url}?{urlencode({'company': self.company })}"
+        ] = f"{gitlab_url}?{query_params}"
 
         resume["sections"]["certifications"]["items"][0]["url"][
             "href"
-        ] = f"{coursera_url}?{urlencode({'company': self.company })}"
+        ] = f"{coursera_url}?{query_params}"
+
+        resume["basics"]["email"] = f"benjc.vincent+{self.pk}@gmail.com"
 
         for i in range(len(job_histories)):
             resume["sections"]["experience"]["items"][i][
@@ -294,10 +298,9 @@ class Application(models.Model):
 
         rs.update(self.resume_id, resume)
         self.resume_url = rs.get_pdf_url(self.resume_id)
-        print(self.resume_id, self.resume_url)
         self.save()
 
-        return f"{self.company} - {self.resume_url}"
+        return self.resume_url
 
     def delete(self):
         rs = ResumeService(
@@ -323,7 +326,6 @@ class Prompt(models.Model):
         ordering = ["-id"]
 
     def __str__(self):
-        print(self.application)
         return f"{self.application.company} -> {self.name}"
 
     def get_trimmed_response(self):

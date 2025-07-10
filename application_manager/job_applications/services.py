@@ -1,9 +1,8 @@
 import requests
-from unique_names_generator import get_random_name
-from unique_names_generator.data import ADJECTIVES, ANIMALS
 import boto3
 from botocore.config import Config
 import os
+import uuid
 
 
 class ResumeService:
@@ -34,12 +33,12 @@ class ResumeService:
         return {"Cookie": f"Authentication={self.auth_token}; "}
 
     def create(self):
-        name = get_random_name(combo=[ADJECTIVES, ADJECTIVES, ANIMALS], separator="-")
+        name = uuid.uuid4()
         r = requests.post(
             f"{self.host}/api/resume",
             json={
-                "slug": name.lower(),
-                "title": name.replace("-", ""),
+                "slug": str(name),
+                "title": str(name).replace("-", ""),
                 "visibility": "private",
             },
             headers=self._get_session_headers(),

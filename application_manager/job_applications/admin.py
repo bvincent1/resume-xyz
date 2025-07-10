@@ -6,18 +6,30 @@ from django.core.validators import EMPTY_VALUES
 from unfold.contrib.filters.admin import FieldTextFilter, RelatedCheckboxFilter
 from django.apps import apps
 from subprocess import run, PIPE
+from django.http import HttpRequest
+from django.shortcuts import redirect
+from unfold.decorators import action
+from django.urls import reverse
+from django.utils.safestring import mark_safe
 
 from .models import ApplicationStatus, Application, JobURL, Prompt, URLStatus
 
 
 class ApplicationAdmin(ModelAdmin):
     model = Application
-    readonly_fields = ("prompts", "created", "updated")
+    readonly_fields = (
+        "id",
+        "prompts",
+        "created",
+        "updated",
+        "prompts_list",
+    )
     fieldsets = [
         (
             None,
             {
                 "fields": (
+                    "id",
                     "company",
                     "title",
                     "job_url",
@@ -25,6 +37,7 @@ class ApplicationAdmin(ModelAdmin):
                     "status",
                     "resume_url",
                     "notes",
+                    "prompts_list",
                 ),
             },
         ),
@@ -39,6 +52,7 @@ class ApplicationAdmin(ModelAdmin):
         ),
     ]
 
+    list_display = ("__str__", "created")
     list_filter_submit = True  # Submit button at the bottom of the filter
     list_filter = [
         ("company", FieldTextFilter),
@@ -47,21 +61,36 @@ class ApplicationAdmin(ModelAdmin):
     ]
 
     actions = ["generate_pdfs", "regenerate_prompts"]
+    actions_detail = ["generate_pdf"]
 
-    def prompts(self, app):
-        return "\n".join(app.list_prompts())
+    @action(
+        description="Build PDF",
+        url_path="generate-pdf-action",
+        attrs={"target": "_blank"},
+    )
+    def generate_pdf(self, request: HttpRequest, object_id: int):
+        app = Application.objects.get(pk=object_id)
 
-    @admin.action(description="Build pdfs")
+        return redirect(app.build_pdf())
+
+    @action(description="Build pdfs")
     def generate_pdfs(self, request, queryset):
         for application in queryset:
             application.build_pdf()
         self.message_user(request, "PDFs generated successfully.")
 
-    @admin.action(description="Regenerate prompts")
+    @action(description="Regenerate prompts")
     def regenerate_prompts(self, request, queryset):
         for application in queryset:
             application.generate_all_prompts()
         self.message_user(request, "Prompts regenerated successfully.")
+
+    def prompts_list(self, obj):
+        links = [
+            f'<li><a class="text-primary-600 dark:text-primary-500 underline" href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">{prompt.name}</a></li>'
+            for prompt in obj.prompts.all()
+        ]
+        return mark_safe("<ul>" + "".join(links) + "</ul>")
 
 
 class PromptAdmin(ModelAdmin):
@@ -97,7 +126,8 @@ class URLStatusAdmin(ModelAdmin):
 
 
 class JobURLAdmin(ModelAdmin):
-    @admin.action(description="Get job info")
+
+    @action(description="Get job info")
     def get_job_info(self, request, queryset):
         urls_string = ",".join([url.url for url in queryset])
         result = run(
