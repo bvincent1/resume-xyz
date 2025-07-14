@@ -70,6 +70,8 @@ class Application(models.Model):
     created = models.DateTimeField(null=False, auto_now_add=True)
     updated = models.DateTimeField(null=False, auto_now=True)
     notes = models.TextField(null=True, blank=True)
+    include_project_management = models.BooleanField(default=True, null=False, blank=False)
+    include_databricks = models.BooleanField(default=True, null=False, blank=False)
 
     class Meta:
         ordering = ["-id"]
@@ -288,6 +290,11 @@ class Application(models.Model):
                 for k in (self.get_prompt(skills_types[i]).response or "").split(",")
             ]
 
+        if not self.include_project_management:
+            del resume["sections"]["certifications"]["items"][0]
+        if not self.include_databricks:
+            del resume["sections"]["certifications"]["items"][1]
+
         rs = ResumeService(
             username=os.getenv("RESUME_USERNAME"),
             password=os.getenv("RESUME_PASSWORD"),
@@ -321,6 +328,12 @@ class Prompt(models.Model):
     )
     name = models.CharField(blank=False, null=False)
     response = models.TextField(blank=True, null=True)
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="children",
+    )
 
     class Meta:
         ordering = ["-id"]

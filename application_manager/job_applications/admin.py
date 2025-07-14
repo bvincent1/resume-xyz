@@ -36,6 +36,8 @@ class ApplicationAdmin(ModelAdmin):
                     "description",
                     "status",
                     "resume_url",
+                    "include_project_management",
+                    "include_databricks",
                     "notes",
                     "prompts_list",
                 ),
@@ -90,7 +92,7 @@ class ApplicationAdmin(ModelAdmin):
             f'<li><a class="text-primary-600 dark:text-primary-500 underline" href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">{prompt.name}</a></li>'
             for prompt in obj.prompts.all()
         ]
-        return mark_safe("<ul>" + "".join(links) + "</ul>")
+        return mark_safe('<ul class="space-y-2">' + "".join(links) + "</ul>")
 
 
 class PromptAdmin(ModelAdmin):
@@ -102,6 +104,7 @@ class PromptAdmin(ModelAdmin):
         ("application__company", FieldTextFilter),
     ]
 
+    readonly_fields = ("children_list",)
     fieldsets = [
         (
             None,
@@ -114,7 +117,15 @@ class PromptAdmin(ModelAdmin):
                 ),
             },
         ),
+        (None, {"fields": ("children_list",)}),
     ]
+
+    def children_list(self, obj):
+        links = [
+            f'<li><a class="text-primary-600 dark:text-primary-500 underline" href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">{prompt.name}</a></li>'
+            for prompt in obj.children.all()
+        ]
+        return mark_safe('<ul class="space-y-2">' + "".join(links) + "</ul>")
 
 
 class StatusAdmin(ModelAdmin):
