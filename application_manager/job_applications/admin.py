@@ -11,11 +11,15 @@ from django.shortcuts import redirect
 from unfold.decorators import action
 from django.urls import reverse
 from django.utils.safestring import mark_safe
+from unfold.contrib.forms.widgets import WysiwygWidget
+from django.db import models
+
 
 from .models import ApplicationStatus, Application, JobURL, Prompt, URLStatus
 
 
 class ApplicationAdmin(ModelAdmin):
+    search_fields = ("company",)
     model = Application
     readonly_fields = (
         "id",
@@ -26,33 +30,48 @@ class ApplicationAdmin(ModelAdmin):
     )
     fieldsets = [
         (
-            None,
+            "Basic",
             {
+                "classes": ["tab"],
                 "fields": (
-                    "id",
                     "company",
                     "title",
                     "job_url",
                     "description",
-                    "status",
-                    "resume_url",
                     "include_project_management",
                     "include_databricks",
+                ),
+            },
+        ),
+        (
+            "Extra",
+            {
+                "classes": ["tab"],
+                "fields": (
+                    "status",
                     "notes",
                     "prompts_list",
                 ),
             },
         ),
         (
-            None,
+            "Metadata",
             {
+                "classes": ["tab"],
                 "fields": (
+                    "id",
+                    "resume_url",
                     "created",
                     "updated",
-                )
+                ),
             },
         ),
     ]
+    formfield_overrides = {
+        models.TextField: {
+            "widget": WysiwygWidget,
+        }
+    }
 
     list_display = ("__str__", "created")
     list_filter_submit = True  # Submit button at the bottom of the filter

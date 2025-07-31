@@ -37,6 +37,8 @@ ALLOWED_HOSTS = ["*"]
 INSTALLED_APPS = [
     "unfold",
     "unfold.contrib.filters",
+    "unfold.contrib.simple_history",
+    "unfold.contrib.forms",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -48,6 +50,7 @@ INSTALLED_APPS = [
     "job_applications",
     "django_celery_beat",
     "django_extensions",
+    "simple_history",
 ]
 
 MIDDLEWARE = [
@@ -58,6 +61,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    'simple_history.middleware.HistoryRequestMiddleware',
 ]
 
 ROOT_URLCONF = "application_manager.urls"
@@ -150,3 +154,12 @@ CORS_ORIGIN_ALLOW_ALL = True
 LOGIN_URL = "/admin/login/"
 
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+
+UNFOLD = {
+    "COMMAND": {
+        "search_models": True,  # Default: False
+        "search_callback": "utils.search_callback",
+        "show_history": True,  # Enable history
+    },
+}
