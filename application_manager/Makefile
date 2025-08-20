@@ -5,6 +5,7 @@ include .env
 export $(shell sed 's/=.*//' .env)
 
 DJANGO=poetry run python manage.py
+CELERY=poetry run python -m celery
 
 install:
 	@poetry install
@@ -36,12 +37,12 @@ services:
 
 
 scheduler:
-	@poetry run celery -A django_api beat -l INFO  --scheduler django_celery_beat.schedulers:DatabaseScheduler
+	@$(CELERY) -A application_manager beat -l INFO  --scheduler django_celery_beat.schedulers:DatabaseScheduler
 .PHONY: scheduler
 
 
 worker:
-	@poetry run celery -A django_api worker -l INFO
+	@$(CELERY) -A application_manager worker -l INFO
 .PHONY: worker
 
 pdfs:

@@ -1,6 +1,7 @@
 from subprocess import call
 from celery import shared_task
 from django.apps import apps
+import os
 
 
 @shared_task
@@ -19,4 +20,7 @@ def fill_in_prompts():
 
 @shared_task
 def backup_to_file():
-    call(["make", "backup"], cwd=apps.get_app_config("app_label").path)
+    call(
+        ["make", "backup"],
+        cwd=os.path.join(apps.get_app_config("job_applications").path, "../"),
+    )
