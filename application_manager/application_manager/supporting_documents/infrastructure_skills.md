@@ -1,3 +1,6 @@
+devops
+IaC
+Terraform
 docker
 kubernetes
 gcp
