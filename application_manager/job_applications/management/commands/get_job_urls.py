@@ -14,7 +14,7 @@ class Command(BaseCommand):
         url = "https://www.linkedin.com/jobs/search/?keywords=Full%20Stack%20Engineer&location=Canada&geoId=101174742&f_TPR=r86400&f_WT=2&position=1&pageNum=0"
         result = run(
             ["node", "../scraper/src/getSearchResults.mjs", url],
-            cwd=apps.get_app_config("app_label").path,
+            cwd=apps.get_app_config("job_applications").path,
             stderr=PIPE,
             stdout=PIPE,
             text=True,
