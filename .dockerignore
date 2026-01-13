@@ -55,6 +55,7 @@ tools/scripts/*
 
 # Environment Variables
 *.env*
+**.env*
 !.env.example
 
 # Lingui Compiled Messages

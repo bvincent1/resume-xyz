@@ -11,5 +11,19 @@
     ]
   },
   "i18n-ally.localesPaths": ["apps/client/src/locales"],
-  "vitest.disableWorkspaceWarning": true
+  "vitest.disableWorkspaceWarning": true,
+  "black.enable": true,
+  "prettier.enable": true,
+  "python.analysis.autoImportCompletions": true,
+  "cSpell.words": [
+    "codegen",
+    "corsheaders",
+    "createapplication",
+    "createsuperuser",
+    "makemigrations",
+    "resourcetype",
+    "sonner",
+    "viewsets"
+  ],
+  "python.defaultInterpreterPath": "${workspaceFolder}/django_api/.venv/bin/python"
 }

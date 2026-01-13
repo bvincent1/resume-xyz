@@ -1,0 +1,151 @@
+version: "3.8"
+
+# In this Docker Compose example, we only fire up the services required for local development.
+# This is not advised for production use as it exposes ports to the database insecurely.
+# If you're looking for a production-ready Docker Compose file, check out the `traefik.yml` file.
+
+services:
+  # Database (Postgres)
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - ${POSTGRES_PORT:-5432}:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Storage (for image uploads)
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data
+    ports:
+      - ${STORAGE_PORT:-9000}:9000
+      - "9001:9001" # Minio Console (Optional)
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ADDRESS: :9000
+      MINIO_CONSOLE_ADDRESS: :9001
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
+
+  # Chrome Browser (for printing and previews)
+  chrome:
+    image: ghcr.io/browserless/chromium:latest
+    restart: unless-stopped
+    ports:
+      - ${CHROME_PORT:-8080}:3000
+    environment:
+      TIMEOUT: 10000
+      CONCURRENT: 10
+      TOKEN: ${CHROME_TOKEN:-chrome_token}
+      EXIT_ON_HEALTH_FAILURE: true
+      PRE_REQUEST_HEALTH_CHECK: true
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - ${RABBITMQ_CLIENT_PORT}:5672
+      - ${RABBITMQ_API_PORT}:15672
+    volumes:
+      - data_rabbitmq:/var/lib/rabbitmq/
+
+  django:
+    build:
+      context: ../../
+      dockerfile: ./Dockerfile.python
+    depends_on:
+      - rabbitmq
+      - postgres
+    env_file: ../../application_manager/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      RABBITMQ_CLIENT_HOST: rabbitmq
+      RABBITMQ_CLIENT_PORT: 5672
+      STORAGE_HOST: http://minio:9000
+      RESUME_SERVICE_HOST: http://resume:3000
+    command: /bin/sh -c 'make django'
+    ports:
+      - "9099:9099"
+
+  resume:
+    build:
+      context: ../../
+      dockerfile: ./Dockerfile.node
+    depends_on:
+      - postgres
+      - minio
+      - chrome
+    ports:
+      - "3000:3000"
+    environment:
+      STORAGE_ENDPOINT: minio
+      STORAGE_URL: http://minio:9000/default
+      STORAGE_PORT: 9000
+      STORAGE_REGION: us-east-1 # Optional
+      STORAGE_BUCKET: default
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_USE_SSL: false
+      STORAGE_SKIP_BUCKET_CHECK: false
+
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?schema=public
+      POSTGRES_HOST: postgres
+
+      POSTGRES_PORT: 5432
+      CHROME_TOKEN: chrome_token
+      CHROME_URL: ws://chrome:8080
+
+      PUBLIC_URL: http://localhost:3000
+
+      ACCESS_TOKEN_SECRET: access_token_secret
+      REFRESH_TOKEN_SECRET: refresh_token_secret
+
+
+  # celery_worker:
+  #   build:
+  #     context: ../../
+  #     dockerfile: ./Dockerfile.python
+  #   depends_on:
+  #     - rabbitmq
+  #     - postgres
+  #   env_file: ../../application_manager/.env
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_PORT: 5432
+  #     RABBITMQ_CLIENT_HOST: rabbitmq
+  #     RABBITMQ_CLIENT_PORT: 5672
+  #     STORAGE_HOST: http://minio:9000
+  #   command: /bin/sh -c 'make worker'
+
+  # celery_scheduler:
+  #   build:
+  #     context: ../../
+  #     dockerfile: ./Dockerfile.python
+  #   depends_on:
+  #     - rabbitmq
+  #     - postgres
+  #   env_file: ../../application_manager/.env
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_PORT: 5432
+  #     RABBITMQ_CLIENT_HOST: rabbitmq
+  #     RABBITMQ_CLIENT_PORT: 5672
+  #     STORAGE_HOST: http://minio:9000
+  #   command: /bin/sh -c 'make scheduler'
+
+volumes:
+  minio_data:
+  postgres_data:
+  data_rabbitmq:

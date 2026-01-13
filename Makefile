@@ -4,6 +4,9 @@ SHELL:=/bin/bash
 include .env
 export $(shell sed 's/=.*//' .env)
 
+# DJANGO=poetry run python manage.py
+# CELERY=poetry run python -m celery
+
 install: ## install reactive resume deps
 	@pnpm install
 .PHONY: install
@@ -24,11 +27,22 @@ django: ## runt he django admin interface
 	@cd application_manager && make dev
 .PHONY: django
 
-services:
-	@docker compose -f tools/compose/development.yml --env-file .env -p reactive-resume up
+services: ## run the dep-services on docker compose
+	@docker compose -f tools/compose/development.yml --env-file .env -p reactive-resume up --build
 .PHONY: services
 
+local: ## run the whole system on docker compose
+	@docker compose -f tools/compose/local.yml --env-file .env -p reactive-resume up --build
+.PHONY: local
 
-backup:
+backup: ## run the backup script and output to [backup.tar](./applications_manager/backup.tar)
 	@cd application_manager && make backup
 .PHONY: backup
+
+scheduler:
+	@cd application_manager && make scheduler
+.PHONY: scheduler
+
+worker:
+	@cd application_manager && make worker
+.PHONY: worker
