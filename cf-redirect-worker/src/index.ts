@@ -12,7 +12,56 @@
  */
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response('Hello World!');
-	},
+  async fetch(request, env, ctx): Promise<Response> {
+    const url = new URL(request.url);
+    console.log(url.search);
+    const subDomain = url.hostname.split(".")[0];
+    if (url.search) {
+      const resp = await fetch(
+        `https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time${url.search}&subdomain=${subDomain}`,
+      );
+
+      console.log({
+        status: resp.status,
+        statustext: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries()),
+      });
+    }
+
+    switch (subDomain.toLowerCase()) {
+      case "github":
+        return new Response(null, {
+          headers: {
+            location: "https://github.com/bvincent1",
+          },
+          status: 302,
+        });
+      case "www": // hanlde "www.linkedin.com.deuterium.dev"
+      case "linkedin":
+        return new Response(null, {
+          headers: {
+            location: "https://www.linkedin.com/in/vincent-slashsolve/",
+          },
+          status: 302,
+        });
+      case "gitlab":
+        return new Response(null, {
+          headers: {
+            location: "https://gitlab.com/bvincent1",
+          },
+          status: 302,
+        });
+      case "coursera":
+        return new Response(null, {
+          headers: {
+            location: "https://www.coursera.org/account/accomplishments/records/B3UH5Y6FNWKA",
+          },
+          status: 302,
+        });
+      default:
+        return new Response("Method not allowed", {
+          status: 405,
+        });
+    }
+  },
 } satisfies ExportedHandler<Env>;
