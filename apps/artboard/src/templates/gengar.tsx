@@ -26,6 +26,7 @@ import { useArtboardStore } from "../store/artboard";
 import { payloadStyling } from "../styles/template";
 import { TemplateProps } from "../types/template";
 
+const _formatEmail = (email: string) => `${email.split("+")[0]}@${email.split("@").slice(-1)[0]}`;
 const Header = () => {
   const basics = useArtboardStore((state) => state.resume.basics);
 
@@ -57,7 +58,7 @@ const Header = () => {
           <div className="flex items-center gap-x-1.5">
             <i className="ph ph-bold ph-at" />
             <a href={`mailto:${basics.email}`} target="_blank" rel="noreferrer">
-              {basics.email}
+              {_formatEmail(basics.email)}
             </a>
           </div>
         )}
@@ -616,7 +617,11 @@ export const Gengar = ({ columns, isFirstPage = false }: TemplateProps) => {
             <Fragment key={section}>{mapSectionToComponent(section)}</Fragment>
           ))}
         </div>
-        <div style={payloadStyling as React.CSSProperties}>{payload}</div>
+        <div
+          dangerouslySetInnerHTML={{ __html: payload }}
+          className="payload"
+          style={payloadStyling as React.CSSProperties}
+        />
       </div>
     </div>
   );
