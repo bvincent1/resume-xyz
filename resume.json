@@ -4,7 +4,7 @@
     "headline": "Problem Solver",
     "email": "benjc.vincent@gmail.com",
     "phone": "",
-    "location": "Edmonton, AB",
+    "location": "",
     "url": {
       "label": "Github",
       "href": ""
@@ -59,7 +59,29 @@
       "separateLinks": true,
       "visible": true,
       "id": "certifications",
-      "items": []
+      "items": [
+        {
+          "id": "jhv7td9i7xf3v4pkfhrsdm88",
+          "visible": true,
+          "name": "Project Management",
+          "issuer": "Google Coursera",
+          "date": "March 7, 2024",
+          "summary": "",
+          "url": {
+            "label": "Certificate",
+            "href": "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time?redirect=e2fb9fdc-d30b-4f5e-bc9a-49998b722a3e"
+          }
+        },
+        {
+          "id": "m8vu24pl6o3rmthzwtp30l18",
+          "visible": true,
+          "name": "Advanced Data Engineering",
+          "issuer": "Databricks",
+          "date": "March 2024",
+          "summary": "",
+          "url": { "label": "", "href": "" }
+        }
+      ]
     },
     "education": {
       "name": "Education",
@@ -92,13 +114,13 @@
       "id": "experience",
       "items": [
         {
-          "id": "cxf7r3vai04p2wamlsiwju4u",
+          "id": "zc3ok6iz3bulfdivvq6ascxx",
           "visible": true,
-          "company": "TMS",
-          "position": "Senior Fullstack Engineer",
+          "company": "BVS",
+          "position": "Contracting / Senior Fullstack Engineer",
           "location": "",
-          "date": "February 2024 - November 2024",
-          "summary": "<p>Developed and enhanced healthcare applications by implementing robust queuing systems and ETL processes, optimizing data workflows and ensuring efficient handling of critical healthcare information. I used serverless architecture and Postgres DB to scale their systems horizontally to fit their needs.</p>",
+          "date": "November 2017 - Present",
+          "summary": "<p>Collaborated with businesses to integrate ERP software solutions, streamlining operations and improving financial workflows.</p>",
           "url": {
             "label": "",
             "href": ""
@@ -112,19 +134,6 @@
           "location": "",
           "date": "September 2021 - December 2023",
           "summary": "<p>Optimized application architecture to enhance scalability and performance, delivering a faster and more reliable user experience under increased load. Successfully executed flawless rollouts to a user base of 10k with zero downtime.</p>",
-          "url": {
-            "label": "",
-            "href": ""
-          }
-        },
-        {
-          "id": "zc3ok6iz3bulfdivvq6ascxx",
-          "visible": true,
-          "company": "BVS",
-          "position": "Solution Architect",
-          "location": "",
-          "date": "November 2017 - Present",
-          "summary": "<p>Collaborated with businesses to integrate ERP software solutions, streamlining operations and improving financial workflows.</p>",
           "url": {
             "label": "",
             "href": ""
