@@ -1,6 +1,7 @@
 from subprocess import call
 from celery import shared_task
 from django.apps import apps
+from .services import FileService
 import os
 
 
@@ -22,5 +23,15 @@ def fill_in_prompts():
 def backup_to_file():
     call(
         ["make", "backup"],
-        cwd=os.path.join(apps.get_app_config("job_applications").path, "../"),
+        cwd=os.path.join(
+            apps.get_app_config("job_applications").path,
+            "../",
+        ),
+    )
+    s3 = FileService()
+    s3.upload_file(
+        os.path.join(
+            apps.get_app_config("job_applications").path,
+            "../backup.tar",
+        )
     )

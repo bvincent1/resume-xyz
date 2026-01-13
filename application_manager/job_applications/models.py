@@ -22,9 +22,9 @@ env = Environment(
 )
 
 job_histories = [
-    "supporting_documents/histories/tms.md",
-    "supporting_documents/histories/staffbase.md",
     "supporting_documents/histories/bvs.md",
+    # "supporting_documents/histories/tms.md",
+    "supporting_documents/histories/staffbase.md",
     "supporting_documents/histories/10SPD.md",
 ]
 
@@ -69,8 +69,14 @@ class Application(models.Model):
 
     created = models.DateTimeField(null=False, auto_now_add=True)
     updated = models.DateTimeField(null=False, auto_now=True)
-    notes = models.TextField(null=True, blank=True)
-    include_project_management = models.BooleanField(default=True, null=False, blank=False)
+    notes = models.TextField(
+        null=True,
+        blank=True,
+        default=FileService().open("supporting_documents/1st_interview_questions.md"),
+    )
+    include_project_management = models.BooleanField(
+        default=True, null=False, blank=False
+    )
     include_databricks = models.BooleanField(default=True, null=False, blank=False)
 
     class Meta:
@@ -183,6 +189,7 @@ class Application(models.Model):
                 ),
                 application=self,
                 name=prompt_name,
+                notes="Job order is: BVS - Contracting / Senior Fullstack Engineer, Staffbase - Senior Fullstack Engineer, 10SPD - Software Engineer",
             ).save()
 
     def list_prompts(self):
@@ -197,11 +204,14 @@ class Application(models.Model):
         self.generate_payload_prompt()
         self.generate_job_name_prompt()
 
-    def get_prompt(self, name):
+    def get_prompt(self, name, error=True):
         try:
             return self.prompts.get(name__exact=name)
         except:
-            raise Exception(f"prompt error trying to get: {name}")
+            if error:
+                raise Exception(f"prompt error trying to get: {name}")
+            else:
+                return None
 
     def build_pdf(self):
         f = FileService()
@@ -222,25 +232,16 @@ class Application(models.Model):
         ] = f"<p>{self.get_prompt("header"
         ).response}</p>"
 
+        job_name_array = []
         # job name section
-        job_name_array = self.get_prompt("job_name").response.split(",")
+        if self.get_prompt("job_name", error=False) is not None:
+            job_name_array = self.get_prompt("job_name").response.split(",")
 
-        resume["sections"]["experience"]["items"][0]["position"] = job_name_array[0]
-
-        if len(job_name_array) >= 2 and job_name_array[1]:
-            resume["sections"]["experience"]["items"][1]["position"] = job_name_array[1]
-        # default to copying entry #0
-        else:
-            resume["sections"]["experience"]["items"][1]["position"] = job_name_array[0]
-
-        if len(job_name_array) >= 3 and job_name_array[2]:
-            resume["sections"]["experience"]["items"][2]["position"] = job_name_array[2]
-
-        if len(job_name_array) >= 4 and job_name_array[3]:
-            resume["sections"]["experience"]["items"][3]["position"] = job_name_array[3]
-
-        if len(job_name_array) >= 5 and job_name_array[4]:
-            resume["sections"]["experience"]["items"][4]["position"] = job_name_array[4]
+        for i in range(len(job_name_array)):
+            if job_name_array[i]:
+                resume["sections"]["experience"]["items"][i]["position"] = (
+                    job_name_array[i]
+                )
 
         ## link section
 
@@ -334,6 +335,7 @@ class Prompt(models.Model):
         on_delete=models.SET_NULL,
         related_name="children",
     )
+    notes = models.TextField(null=True, blank=True)
 
     class Meta:
         ordering = ["-id"]
@@ -371,7 +373,7 @@ class JobURL(models.Model):
         null=False,
         blank=False,
         on_delete=models.PROTECT,
-        default=URLStatus.objects.get(name="todo"),
+        # default=URLStatus.objects.get(name="todo"),
     )
 
     def __str__(self):

@@ -1,8 +1,8 @@
 from json import loads
+import os
 import pprint
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from django.core.validators import EMPTY_VALUES
 from unfold.contrib.filters.admin import FieldTextFilter, RelatedCheckboxFilter
 from django.apps import apps
 from subprocess import run, PIPE
@@ -122,6 +122,11 @@ class PromptAdmin(ModelAdmin):
     list_filter = [
         ("application__company", FieldTextFilter),
     ]
+    # formfield_overrides = {
+    #     models.TextField: {
+    #         "widget": WysiwygWidget,
+    #     }
+    # }
 
     readonly_fields = ("children_list",)
     fieldsets = [
@@ -131,6 +136,7 @@ class PromptAdmin(ModelAdmin):
                 "fields": (
                     "application",
                     "name",
+                    "notes",
                     "description",
                     "response",
                 ),
@@ -161,8 +167,11 @@ class JobURLAdmin(ModelAdmin):
     def get_job_info(self, request, queryset):
         urls_string = ",".join([url.url for url in queryset])
         result = run(
-            ["node", "../scraper/src/getJobInfo.mjs", urls_string],
-            cwd=apps.get_app_config("app_label").path,
+            ["node", "./src/getJobInfo.mjs", urls_string],
+            cwd=os.path.join(
+                apps.get_app_config("job_applications").path,
+                "../../scraper",
+            ),
             stderr=PIPE,
             stdout=PIPE,
             text=True,

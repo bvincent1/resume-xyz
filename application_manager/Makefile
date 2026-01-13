@@ -42,6 +42,7 @@ scheduler:
 
 
 worker:
+	@env
 	@$(CELERY) -A application_manager worker -l INFO
 .PHONY: worker
 

@@ -7,7 +7,7 @@ from django.conf import settings
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "application_manager.settings")
 app = Celery(
     "application_manager",
-    broker=f"pyamqp://guest@localhost:{os.getenv("RABBITMQ_CLIENT_PORT")}//",
+    broker=f"pyamqp://guest@{os.getenv("RABBITMQ_CLIENT_HOST")}:{os.getenv("RABBITMQ_CLIENT_PORT")}//",
 )
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
