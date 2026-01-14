@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     command: server /data
     ports:
-      - ${STORAGE_PORT:-9000}:9000
+      - 9000:9000
       - "9001:9001" # Minio Console (Optional)
     volumes:
       - minio_data:/data
@@ -44,7 +44,7 @@ services:
     image: ghcr.io/browserless/chromium:latest
     restart: unless-stopped
     ports:
-      - ${CHROME_PORT:-8080}:3000
+      - 8080:3000
     environment:
       TIMEOUT: 10000
       CONCURRENT: 10
@@ -55,8 +55,8 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     ports:
-      - ${RABBITMQ_CLIENT_PORT}:5672
-      - ${RABBITMQ_API_PORT}:15672
+      - 5672:5672
+      - 15672:15672
     volumes:
       - data_rabbitmq:/var/lib/rabbitmq/
 
@@ -90,11 +90,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      STORAGE_ENDPOINT: minio
-      STORAGE_URL: http://minio:9000/default
+      STORAGE_URL: http://localhost:9000/default
       STORAGE_PORT: 9000
       STORAGE_REGION: us-east-1 # Optional
       STORAGE_BUCKET: default
+      STORAGE_ENDPOINT: minio
       STORAGE_ACCESS_KEY: minioadmin
       STORAGE_SECRET_KEY: minioadmin
       STORAGE_USE_SSL: false
@@ -105,9 +105,9 @@ services:
 
       POSTGRES_PORT: 5432
       CHROME_TOKEN: chrome_token
-      CHROME_URL: ws://chrome:8080
+      CHROME_URL: ws://chrome:3000 # use internal port mapping
 
-      PUBLIC_URL: http://localhost:3000
+      PUBLIC_URL: http://resume:3000
 
       ACCESS_TOKEN_SECRET: access_token_secret
       REFRESH_TOKEN_SECRET: refresh_token_secret

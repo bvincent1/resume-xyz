@@ -8,7 +8,7 @@ import uuid
 class ResumeService:
 
     def __init__(self, **kwargs):
-        self.host = os.getenv("RESUME_SERVICE_HOST")
+        self.host = kwargs.get("resume_service_host", os.getenv("RESUME_SERVICE_HOST"))
 
         if kwargs.get("username") is None or kwargs.get("password") is None:
             raise ValueError("Missing username or password")
@@ -80,10 +80,14 @@ class FileService:
     def __init__(self, **kwargs):
         self.client = boto3.client(
             "s3",
-            endpoint_url=os.getenv("STORAGE_HOST"),
-            region_name=os.getenv("STORAGE_REGION"),
-            aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY"),
-            aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY"),
+            endpoint_url=kwargs.get("storage_host", os.getenv("STORAGE_HOST")),
+            region_name=kwargs.get("storage_region", os.getenv("STORAGE_REGION")),
+            aws_access_key_id=kwargs.get(
+                "storage_access_key", os.getenv("STORAGE_ACCESS_KEY")
+            ),
+            aws_secret_access_key=kwargs.get(
+                "storage_secret_key", os.getenv("STORAGE_SECRET_KEY")
+            ),
             aws_session_token=None,
             config=Config(signature_version="s3v4"),
             verify=False,

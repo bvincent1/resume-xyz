@@ -32,7 +32,7 @@ services: ## run the dep-services on docker compose
 .PHONY: services
 
 local: ## run the whole system on docker compose
-	@docker compose -f tools/compose/local.yml --env-file .env -p reactive-resume up --build
+	@docker compose -f tools/compose/local.yml --env-file .env -p reactive-resume up
 .PHONY: local
 
 backup: ## run the backup script and output to [backup.tar](./applications_manager/backup.tar)
@@ -46,3 +46,7 @@ scheduler:
 worker:
 	@cd application_manager && make worker
 .PHONY: worker
+
+build-local: ## build local compose containers
+	@docker compose -f tools/compose/local.yml build
+.PHONY: build-local
