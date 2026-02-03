@@ -10,6 +10,7 @@
  *
  * Learn more at https://developers.cloudflare.com/workers/
  */
+import { Client } from "pg";
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -17,15 +18,17 @@ export default {
     console.log(url.search);
     const subDomain = url.hostname.split(".")[0];
     if (url.search) {
-      const resp = await fetch(
-        `https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time${url.search}&subdomain=${subDomain}`,
-      );
+      console.log(env.HYPERDRIVE.connectionString);
+      const client = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+      await client.connect();
 
-      console.log({
-        status: resp.status,
-        statustext: resp.statusText,
-        headers: Object.fromEntries(resp.headers.entries()),
-      });
+      const result = await client.query("insert into tracking.cloudflare_logs (data) values ($1)", [
+        JSON.stringify({
+          search: Object.fromEntries(new URLSearchParams(url.search)),
+          subDomain,
+        }),
+      ]);
+      console.log(result);
     }
 
     switch (subDomain.toLowerCase()) {
