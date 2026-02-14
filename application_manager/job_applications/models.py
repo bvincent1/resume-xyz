@@ -66,6 +66,8 @@ class Application(models.Model):
 
     job_url = models.URLField(blank=True, null=True)
     resume_url = models.URLField(blank=True, null=True)
+    last_scanned_requests = models.DateTimeField(null=True)
+    last_scanned_browserless = models.DateTimeField(null=True)
 
     created = models.DateTimeField(null=False, auto_now_add=True)
     updated = models.DateTimeField(null=False, auto_now=True)
