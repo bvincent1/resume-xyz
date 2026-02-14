@@ -31,7 +31,7 @@ services: ## run the dep-services on docker compose
 	@docker compose -f tools/compose/development.yml --env-file .env -p reactive-resume up --build
 .PHONY: services
 
-local: ## run the whole system on docker compose
+local: build-local ## run the whole system on docker compose
 	@docker compose -f tools/compose/local.yml --env-file .env -p reactive-resume up
 .PHONY: local
 
