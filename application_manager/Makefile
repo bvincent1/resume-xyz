@@ -28,7 +28,7 @@ dev:
 .PHONY: dev
 
 shell:
-	@$(DJANGO) shell
+	@$(DJANGO) shell_plus --bpython
 .PHONY: shell
 
 services:

@@ -37,10 +37,12 @@ boto3 = "^1.37.18"
 django-unfold = "^0.55.3"
 django-extensions = "^4.1"
 django-simple-history = "^3.10.1"
+pyppeteer = "^2.0.0"
 
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.10.0"
+bpython = "^0.26"
 
 
 
