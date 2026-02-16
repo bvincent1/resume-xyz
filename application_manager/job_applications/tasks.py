@@ -6,6 +6,8 @@ from .services import FileService
 import os
 import requests
 from pyppeteer import connect
+from datetime import timedelta
+from django.conf import settings
 
 
 # @shared_task
@@ -45,15 +47,18 @@ def requests_check_urls():
     from .models import Application, ApplicationStatus
 
     deleted_status = ApplicationStatus.objects.get(name__exact="deleted")
+    print(f"{deleted_status=}")
     applications = Application.objects.exclude(
-        status__exact=deleted_status.name,
+        status__exact=deleted_status,
         job_url__isnull=True,
-        job_url__icontains="linkedin",
+        last_scanned_requests__lt=timezone.now()
+        + timedelta(**settings.TASK_SCAN["requests_scan_date_offset"]),
     ).order_by("-last_scanned_requests")[:20]
+    print(f"{applications=}")
     for app in applications:
-        result = requests.get(app.job_url)
-        print(result)
-        if result.status_code != 200:
+        request_result = requests.get(app.job_url)
+        print(f"{request_result=}")
+        if request_result.status_code != 200:
             app.status = deleted_status
         app.last_scanned_requests = timezone.now()
         app.save()

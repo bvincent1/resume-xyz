@@ -61,7 +61,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    'simple_history.middleware.HistoryRequestMiddleware',
+    "simple_history.middleware.HistoryRequestMiddleware",
 ]
 
 ROOT_URLCONF = "application_manager.urls"
@@ -162,4 +162,10 @@ UNFOLD = {
         "search_callback": "utils.search_callback",
         "show_history": True,  # Enable history
     },
+}
+
+
+TASK_SCAN = {
+    # see [timedelta] kwargs for format
+    "requests_scan_date_offset": {"days": -20},
 }
