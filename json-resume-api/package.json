@@ -1,0 +1,19 @@
+{
+  "name": "json-resume-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0-0",
+  "dependencies": {
+    "express": "^5.3.0",
+    "json-resume": "^1.0.4",
+    "jsonresume-theme-straightforward": "^0.5.0"
+  }
+}
