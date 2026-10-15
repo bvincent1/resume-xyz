@@ -15,7 +15,14 @@ from unfold.contrib.forms.widgets import WysiwygWidget
 from django.db import models
 
 
-from .models import ApplicationStatus, Application, JobURL, Prompt, URLStatus
+from .models import (
+    ApplicationStatus,
+    Application,
+    JobURL,
+    Prompt,
+    URLStatus,
+    PromptProvider,
+)
 
 
 class ApplicationAdmin(ModelAdmin):
@@ -183,9 +190,14 @@ class JobURLAdmin(ModelAdmin):
         self.message_user(request, "Prompts regenerated successfully.")
 
 
+class PromptProviderAdmin(ModelAdmin):
+    pass
+
+
 # Register your models here.
 admin.site.register(ApplicationStatus, StatusAdmin)
 admin.site.register(Application, ApplicationAdmin)
 admin.site.register(Prompt, PromptAdmin)
 admin.site.register(URLStatus, URLStatusAdmin)
 admin.site.register(JobURL, JobURLAdmin)
+admin.site.register(PromptProvider, PromptProviderAdmin)

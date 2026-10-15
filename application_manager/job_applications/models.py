@@ -74,7 +74,9 @@ class Application(models.Model):
     notes = models.TextField(
         null=True,
         blank=True,
-        default=open("application_manager/supporting_documents/1st_interview_questions.md", 'r').read(),
+        default=open(
+            "application_manager/supporting_documents/1st_interview_questions.md", "r"
+        ).read(),
     )
     include_project_management = models.BooleanField(
         default=True, null=False, blank=False
@@ -229,9 +231,7 @@ class Application(models.Model):
             csl=self.get_prompt("csl").response,
             breakout=breakout,
         )
-        resume["sections"]["summary"][
-            "content"
-        ] = f"<p>{self.get_prompt("header"
+        resume["sections"]["summary"]["content"] = f"<p>{self.get_prompt("header"
         ).response}</p>"
 
         job_name_array = []
@@ -321,6 +321,22 @@ class Application(models.Model):
         return super().delete()
 
 
+class PromptProvider(models.Model):
+    name = models.CharField(blank=False, null=False, unique=True)
+    url = models.URLField(blank=False, null=False)
+    headers = models.JSONField(default=dict, blank=True)
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_default_pk(cls):
+        status, _created = cls.objects.get(
+            name="default",
+        )
+        return status.pk
+
+
 class Prompt(models.Model):
     description = models.TextField(blank=False, null=False)
     application = models.ForeignKey(
@@ -338,6 +354,13 @@ class Prompt(models.Model):
         related_name="children",
     )
     notes = models.TextField(null=True, blank=True)
+    # provider = models.ForeignKey(
+    #     PromptProvider,
+    #     null=False,
+    #     on_delete=models.SET_NULL,
+    #     related_name="prompts",
+    #     default=PromptProvider.get_default_pk(),
+    # )
 
     class Meta:
         ordering = ["-id"]
