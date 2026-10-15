@@ -1,0 +1,40 @@
+{{#resume.basics}}
+  <div class="basics">
+    <h1 class="basics-name">{{name}}</h1>
+
+    <div class="basics-contact-row">
+      {{#location}}
+        {{#if city}}
+          <span class="basics-contact-item">{{city}}{{#if region}}, {{STATE_ABBREVIATION_TO_FULL_NAME region}}{{/if}}</span>
+        {{/if}}
+      {{/location}}
+      {{#if email}}
+        <span class="basics-contact-item"><a href="mailto:{{email}}">{{email}}</a></span>
+      {{/if}}
+      {{#if phone}}
+        <span class="basics-contact-item"><a href="tel:{{phone}}">{{{FORMAT_PHONE phone}}}</a></span>
+      {{/if}}
+    </div>
+
+    {{#if url}}
+      <div class="basics-contact-row">
+        <span class="basics-contact-item"><a href="{{url}}">{{url}}</a></span>
+        {{#each profiles}}
+          {{#if url}}
+            <span class="basics-contact-item"><a href="{{url}}">{{STRIP_PROTOCOL url}}</a></span>
+          {{/if}}
+        {{/each}}
+      </div>
+    {{else}}
+      {{#if profiles.length}}
+        <div class="basics-contact-row">
+          {{#each profiles}}
+            {{#if url}}
+              <span class="basics-contact-item"><a href="{{url}}">{{STRIP_PROTOCOL url}}</a></span>
+            {{/if}}
+          {{/each}}
+        </div>
+      {{/if}}
+    {{/if}}
+  </div>
+{{/resume.basics}}

@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const express = require('express');
-const theme = require('jsonresume-theme-straightforward');
+const theme = require('../theme');
 
 const app = express();
 

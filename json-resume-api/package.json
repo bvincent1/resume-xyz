@@ -18,8 +18,8 @@
   },
   "dependencies": {
     "express": "^5.3.0",
+    "handlebars": "^4.7.10",
     "json-resume": "^1.0.4",
-    "jsonresume-theme-straightforward": "^0.5.0",
     "puppeteer": "^25.14.0"
   }
 }
