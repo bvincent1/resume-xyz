@@ -10,10 +10,38 @@ const app = express();
 const port = process.env.PORT || 3000;
 const publicDir = path.join(__dirname, '..', 'public');
 
+// puppeteer is ESM-only, so load it lazily from CommonJS.
+let puppeteerPromise;
+function getPuppeteer() {
+  if (!puppeteerPromise) {
+    puppeteerPromise = import('puppeteer').then((mod) => mod.default);
+  }
+  return puppeteerPromise;
+}
+
+let browserPromise;
+
+// Launch the browser once and reuse it, relaunching it if the connection drops.
+function getBrowser() {
+  if (!browserPromise) {
+    browserPromise = getPuppeteer()
+      // --no-sandbox is required in environments without unprivileged user namespaces (e.g. containers).
+      .then((puppeteer) =>
+        puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] }),
+      )
+      .then((browser) => {
+        browser.once('disconnected', () => (browserPromise = undefined));
+        return browser;
+      });
+    browserPromise.catch(() => (browserPromise = undefined));
+  }
+  return browserPromise;
+}
+
 app.use(express.json());
 app.use(express.static(publicDir));
 
-// Renders the posted JSON Resume and stores the result in the public dir.
+// Renders the posted JSON Resume to a PDF and stores it in the public dir.
 app.post('/resume', async (req, res, next) => {
   const resume = req.body;
 
@@ -21,20 +49,28 @@ app.post('/resume', async (req, res, next) => {
     return res.status(400).json({ error: 'Request body must be a JSON Resume object.' });
   }
 
+  let page;
   try {
     const html = theme.render(resume);
     const filename = `${crypto
       .createHash('sha256')
       .update(JSON.stringify(resume))
       .digest('hex')
-      .slice(0, 16)}.html`;
+      .slice(0, 16)}.pdf`;
+    const filePath = path.join(publicDir, filename);
 
     await fs.mkdir(publicDir, { recursive: true });
-    await fs.writeFile(path.join(publicDir, filename), html, 'utf8');
+
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'load' });
+    await page.pdf({ path: filePath, format: 'A4', printBackground: true });
 
     res.status(201).json({ path: `/${filename}` });
   } catch (err) {
     next(err);
+  } finally {
+    if (page) await page.close().catch(() => {});
   }
 });
 
@@ -48,9 +84,21 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`json-resume-api listening on http://localhost:${port}`);
   });
+
+  const shutdown = async () => {
+    server.close();
+    if (browserPromise) {
+      const browser = await browserPromise.catch(() => undefined);
+      if (browser) await browser.close();
+    }
+    process.exit(0);
+  };
+
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }
 
 module.exports = app;

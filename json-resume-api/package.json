@@ -11,9 +11,15 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.14.0-0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "puppeteer"
+    ]
+  },
   "dependencies": {
     "express": "^5.3.0",
     "json-resume": "^1.0.4",
-    "jsonresume-theme-straightforward": "^0.5.0"
+    "jsonresume-theme-straightforward": "^0.5.0",
+    "puppeteer": "^25.14.0"
   }
 }
