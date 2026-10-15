@@ -5,21 +5,21 @@ import os
 import base64
 from urllib.parse import urlencode
 
-from .services import FileService, ResumeService
+# from .services import FileService, ResumeService
 
 
-class S3Loader(BaseLoader):
-    def get_source(self, env, template):
-        return (
-            FileService().open(template),
-            template,
-            lambda: False,
-        )
+# class S3Loader(BaseLoader):
+#     def get_source(self, env, template):
+#         return (
+#             FileService().open(template),
+#             template,
+#             lambda: False,
+#         )
 
 
-env = Environment(
-    loader=S3Loader(),
-)
+# env = Environment(
+#     loader=S3Loader(),
+# )
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -74,7 +74,7 @@ class Application(models.Model):
     notes = models.TextField(
         null=True,
         blank=True,
-        default=FileService().open("supporting_documents/1st_interview_questions.md"),
+        default=open("application_manager/supporting_documents/1st_interview_questions.md", 'r').read(),
     )
     include_project_management = models.BooleanField(
         default=True, null=False, blank=False

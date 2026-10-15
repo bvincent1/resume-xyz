@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 import os
 from pathlib import Path
+import dj_database_url
+
 from django.core.management.commands.runserver import Command as runserver
 
 runserver.default_port = "8099"
@@ -91,14 +93,12 @@ CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": os.getenv("POSTGRES_DB", "postgres"),
-        "USER": os.getenv("POSTGRES_USER", "postgres"),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "postgres"),
-        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-        "PORT": os.getenv("POSTGRES_PORT", "54322"),
-    }
+    "default": dj_database_url.config(
+        env="POSTGRES_URL",
+        default="postgres://postgres:postgres@localhost:5459/postgres",
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
 
 

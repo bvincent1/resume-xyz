@@ -55,7 +55,6 @@ prompts:
 .PHONY: prompts
 
 
-DB_CONNECTION=postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
 backup:
 	@pg_dump -a -O -f backup.tar -Ft -d $(DB_CONNECTION)
 .PHONY: backup
