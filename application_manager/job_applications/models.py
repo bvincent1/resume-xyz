@@ -83,9 +83,9 @@ class Application(models.Model):
     notes = models.TextField(
         null=True,
         blank=True,
-        default=open(
-            "application_manager/supporting_documents/1st_interview_questions.md", "r"
-        ).read(),
+        default=read_supporting_document(
+            "supporting_documents/1st_interview_questions.md"
+        ),
     )
     include_project_management = models.BooleanField(
         default=True, null=False, blank=False
