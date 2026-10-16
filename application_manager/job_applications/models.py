@@ -226,11 +226,12 @@ class Application(models.Model):
                 return None
 
     def build_pdf(self):
-        f = FileService()
         api_url = (
             "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time"
         )
-        resume = json.loads(f.open("json-resume.json"))
+        resume = json.loads(
+            read_supporting_document("supporting_documents/json-resume.json")
+        )
         breakout = env.get_template("templates/breakout.md").render(
             url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
             base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",

@@ -6,7 +6,7 @@ Personal resume / job-application toolkit. Three independent subprojects, no roo
 - `application_manager/` — Django 5.1 admin-only app (the main project). Entrypoint `application_manager/manage.py`; settings module `application_manager.settings`; `/` redirects to `/admin/`. Custom user `accounts.CustomUser` (email login, `AUTH_USER_MODEL`).
 - `json-resume-api/` — Express 5 + puppeteer. `POST /resume` renders a JSON Resume object to a PDF under `public/`. `src/index.js` renders through the local `theme/` Handlebars package (`require('../theme')`).
 - `cf-redirect-worker/` — Cloudflare Worker (TypeScript + wrangler + Hyperdrive). Redirects `*.deuterium.dev` and logs query strings to Postgres table `tracking.cloudflare_logs`.
-- `resume.json` is the Reactive Resume export format (no longer read by the app); `json-resume.json` is the JSON Resume format that Django `Application.build_pdf()` reads and POSTs to the `json-resume-api`.
+- `resume.json` is the Reactive Resume export format (no longer read by the app); `json-resume.json` (under `application_manager/application_manager/supporting_documents/`) is the JSON Resume format that Django `Application.build_pdf()` reads from the local filesystem and POSTs to the `json-resume-api`.
 
 ## Do not trust the inherited root cruft
 Root `Makefile`, `Dockerfile.node`, `.vscode/settings.json`, and `.dockerignore` are carried over from the upstream `reactive-resume` project and point at paths that do not exist here (`tools/compose`, root `package.json`/`pnpm-lock.yaml`, `apps/client`, `scraper`, `prisma`, NX). The root `Makefile` also does `include .env`, which is absent, so it errors before running anything. `Dockerfile.node` cannot build (missing root `package.json`); `Dockerfile.python` has no `CMD`. Use the per-project commands below.
@@ -36,9 +36,9 @@ Root `Makefile`, `Dockerfile.node`, `.vscode/settings.json`, and `.dockerignore`
 ## Env / tooling gotchas
 - No root `.env` exists. The root `Makefile` and `cf-redirect-worker/Makefile` (`include ../.env`) need one — copy `.env.example`. `application_manager/.env` is separate and untracked.
 - `.env.example` documents `DATABASE_URL`, but Django reads `POSTGRES_URL` (default `postgres://postgres:postgres@localhost:5459/postgres`). Env vars referenced in Django code: `POSTGRES_URL`, `RABBITMQ_CLIENT_HOST/PORT`, `RESUME_SERVICE_HOST` (base URL of the `json-resume-api`), `STORAGE_HOST/REGION/ACCESS_KEY/SECRET_KEY`, `CHROME_URL/CHROME_TOKEN`.
-- `Application.notes` has a field default that opens `application_manager/supporting_documents/1st_interview_questions.md` relative to CWD at import time — run Django from `application_manager/` or imports fail.
+- `Application.notes` has a field default that reads `supporting_documents/1st_interview_questions.md` from the local filesystem via `settings.BASE_DIR` at import time (no longer CWD-dependent).
 - `.python-version` says 3.13.0 but `.tool-versions`, `pyproject.toml`, and `Dockerfile.python` use 3.12.
 
 ## Known WIP gaps (verify before relying on these paths)
-- `build_pdf()` / prompt generation load `json-resume.json`, `templates/*`, and `supporting_documents/*` from S3 via `FileService`; the bucket must contain these (the repo only keeps local copies under `application_manager/application_manager/`).
+- `build_pdf()` and prompt generation read `json-resume.json` and `supporting_documents/*` from the local filesystem under `application_manager/application_manager/`; the Jinja `templates/*` are still loaded from S3 via `FileService`, so the bucket must contain them.
 - `job_applications/admin.py` and the `get_job_urls` command shell out to a `scraper/` Node project that is not in this repo.
