@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from jinja2 import Environment, BaseLoader
 import json
@@ -33,6 +34,17 @@ skills_types = [
     "database",
     "infrastructure",
 ]
+
+
+def read_supporting_document(path):
+    """Read a supporting document from the local filesystem.
+
+    ``path`` mirrors the S3 key previously used and is relative to the Django
+    project directory, e.g. ``supporting_documents/histories/bvs.md``.
+    """
+    return (settings.BASE_DIR / "application_manager" / path).read_text(
+        encoding="utf-8"
+    )
 
 
 class ApplicationStatus(models.Model):
@@ -93,9 +105,8 @@ class Application(models.Model):
         self.generate_all_prompts()
 
     def generate_job_histories_prompts(self):
-        f = FileService()
         for doc in job_histories:
-            tasks_list = f.open(doc)
+            tasks_list = read_supporting_document(doc)
             name = doc.split("/")[-1]
             try:
                 p = self.get_prompt(name)
@@ -131,8 +142,7 @@ class Application(models.Model):
             ).save()
 
     def generate_header_prompt(self):
-        f = FileService()
-        jobs = [f.open(h) for h in job_histories]
+        jobs = [read_supporting_document(h) for h in job_histories]
         try:
             p = self.get_prompt("header")
             p.description = env.get_template("templates/resume_header.md").render(
@@ -151,9 +161,10 @@ class Application(models.Model):
             ).save()
 
     def generate_skills_prompts(self):
-        f = FileService()
         for skill_type in skills_types:
-            skills_list = f.open(f"supporting_documents/{skill_type}_skills.md")
+            skills_list = read_supporting_document(
+                f"supporting_documents/{skill_type}_skills.md"
+            )
             try:
                 p = self.get_prompt(skill_type)
                 p.description = env.get_template("templates/skills_list.md").render(
