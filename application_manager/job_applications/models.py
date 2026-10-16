@@ -1,25 +1,24 @@
 from django.db import models
 from jinja2 import Environment, BaseLoader
 import json
-import os
 import base64
 from urllib.parse import urlencode
 
-# from .services import FileService, ResumeService
+from .services import FileService, render_pdf
 
 
-# class S3Loader(BaseLoader):
-#     def get_source(self, env, template):
-#         return (
-#             FileService().open(template),
-#             template,
-#             lambda: False,
-#         )
+class S3Loader(BaseLoader):
+    def get_source(self, env, template):
+        return (
+            FileService().open(template),
+            template,
+            lambda: False,
+        )
 
 
-# env = Environment(
-#     loader=S3Loader(),
-# )
+env = Environment(
+    loader=S3Loader(),
+)
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -62,8 +61,6 @@ class Application(models.Model):
         default=ApplicationStatus.get_default_pk(),
     )
     company = models.CharField(null=False, blank=False, default="")
-    resume_id = models.CharField(null=True, blank=True)
-
     job_url = models.URLField(blank=True, null=True)
     resume_url = models.URLField(blank=True, null=True)
     last_scanned_requests = models.DateTimeField(null=True)
@@ -222,7 +219,7 @@ class Application(models.Model):
         api_url = (
             "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time"
         )
-        resume = json.loads(f.open("resume.json"))
+        resume = json.loads(f.open("json-resume.json"))
         breakout = env.get_template("templates/breakout.md").render(
             url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
             base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
@@ -231,8 +228,7 @@ class Application(models.Model):
             csl=self.get_prompt("csl").response,
             breakout=breakout,
         )
-        resume["sections"]["summary"]["content"] = f"<p>{self.get_prompt("header"
-        ).response}</p>"
+        resume["basics"]["summary"] = self.get_prompt("header").response
 
         job_name_array = []
         # job name section
@@ -241,9 +237,7 @@ class Application(models.Model):
 
         for i in range(len(job_name_array)):
             if job_name_array[i]:
-                resume["sections"]["experience"]["items"][i]["position"] = (
-                    job_name_array[i]
-                )
+                resume["work"][i]["position"] = job_name_array[i]
 
         ## link section
 
@@ -262,62 +256,38 @@ class Application(models.Model):
         query_params = urlencode(
             {"company": self.company, "method": "resume", "app": self.pk}
         )
-        resume["sections"]["profiles"]["items"][0]["url"][
-            "href"
-        ] = f"{linkedin_url}?{query_params}"
+        resume["basics"]["profiles"][0]["url"] = f"{linkedin_url}?{query_params}"
 
-        resume["sections"]["profiles"]["items"][1]["url"][
-            "href"
-        ] = f"{github_url}?{query_params}"
+        resume["basics"]["profiles"][1]["url"] = f"{github_url}?{query_params}"
 
-        resume["sections"]["profiles"]["items"][2]["url"][
-            "href"
-        ] = f"{gitlab_url}?{query_params}"
+        resume["basics"]["profiles"][2]["url"] = f"{gitlab_url}?{query_params}"
 
-        resume["sections"]["certifications"]["items"][0]["url"][
-            "href"
-        ] = f"{coursera_url}?{query_params}"
+        resume["certificates"][0]["url"] = f"{coursera_url}?{query_params}"
 
         resume["basics"]["email"] = f"benjc.vincent+{self.pk}@gmail.com"
 
         for i in range(len(job_histories)):
-            resume["sections"]["experience"]["items"][i][
-                "summary"
-            ] = f"<p>{self.get_prompt(
+            resume["work"][i]["summary"] = self.get_prompt(
                 job_histories[i].split("/")[-1]
-            ).response}</p>"
+            ).response
 
         for i in range(len(skills_types)):
-            resume["sections"]["skills"]["items"][i]["keywords"] = [
+            resume["skills"][i]["keywords"] = [
                 k.strip()
                 for k in (self.get_prompt(skills_types[i]).response or "").split(",")
             ]
 
         if not self.include_project_management:
-            del resume["sections"]["certifications"]["items"][0]
+            del resume["certificates"][0]
         if not self.include_databricks:
-            del resume["sections"]["certifications"]["items"][1]
+            del resume["certificates"][1]
 
-        rs = ResumeService(
-            username=os.getenv("RESUME_USERNAME"),
-            password=os.getenv("RESUME_PASSWORD"),
-        )
-
-        if self.resume_id is None:
-            self.resume_id = rs.create()
-
-        rs.update(self.resume_id, resume)
-        self.resume_url = rs.get_pdf_url(self.resume_id)
+        self.resume_url = render_pdf(resume)
         self.save()
 
         return self.resume_url
 
     def delete(self):
-        rs = ResumeService(
-            username=os.getenv("RESUME_USERNAME"),
-            password=os.getenv("RESUME_PASSWORD"),
-        )
-        rs.delete(self.resume_id)
         return super().delete()
 
 
