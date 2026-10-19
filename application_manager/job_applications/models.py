@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.db import models
-from jinja2 import Environment, BaseLoader
+from jinja2 import Environment, FileSystemLoader
 import json
 import base64
 from urllib.parse import urlencode
@@ -8,18 +8,7 @@ from urllib.parse import urlencode
 from .services import FileService, render_pdf
 
 
-class S3Loader(BaseLoader):
-    def get_source(self, env, template):
-        return (
-            FileService().open(template),
-            template,
-            lambda: False,
-        )
-
-
-env = Environment(
-    loader=S3Loader(),
-)
+env = Environment(loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager")))
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -108,19 +97,18 @@ class Application(models.Model):
         for doc in job_histories:
             tasks_list = read_supporting_document(doc)
             name = doc.split("/")[-1]
+            template_args = {
+                "job_description": self.description,
+                "job_tasks_list":tasks_list,
+            }
+
             try:
                 p = self.get_prompt(name)
-                p.description = env.get_template("templates/job_blurb.md").render(
-                    job_description=self.description,
-                    job_tasks_list=tasks_list,
-                )
+                p.description = env.get_template("templates/job_blurb.md").render(**template_args)
                 p.save()
             except:
                 Prompt(
-                    description=env.get_template("templates/job_blurb.md").render(
-                        job_description=self.description,
-                        job_tasks_list=tasks_list,
-                    ),
+                    description=env.get_template("templates/job_blurb.md").render(**template_args),
                     application=self,
                     name=name,
                 ).save()
