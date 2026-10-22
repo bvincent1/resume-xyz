@@ -51,7 +51,7 @@ pdfs:
 .PHONY: pdfs
 
 prompts:
-	@$(DJANGO) regen_prompts
+	@$(DJANGO) generate_prompts
 .PHONY: prompts
 
 

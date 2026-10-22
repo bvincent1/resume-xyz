@@ -1,12 +1,13 @@
 from django.core.management.base import BaseCommand
-from pprint import pprint
 from job_applications.models import Application
+from job_applications.tasks import generate_prompts
 
 
 class Command(BaseCommand):
-    help = "Generate pdfs for applications"
+    help = "Generate prompts for applications"
 
     def handle(self, *args, **kwargs):
-        [a.generate_all_prompts() for a in Application.objects.filter(status__name="todo")]
+        for application in Application.objects.filter(status__name="todo"):
+            generate_prompts.delay(application.pk, force=True)
 
         self.stdout.write(self.style.SUCCESS("Successfully regenerated prompts"))
