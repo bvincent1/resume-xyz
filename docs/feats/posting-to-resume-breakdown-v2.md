@@ -11,7 +11,7 @@ The remaining 9 prompts are left to you — see [Adding the remaining prompts](#
 | Built here | Left to you |
 | --- | --- |
 | `pydantic-ai` dependency, provider lookup, model tiers | the `job_name` prompt |
-| the async celery task, semaphore, error capture | the 4 skills prompts (`frontend`, `backend`, `database`, `infrastructure`) |
+| the synchronous celery task, series run loop, error capture | the 4 skills prompts (`frontend`, `backend`, `database`, `infrastructure`) |
 | `PipelineDeps` + the tool pattern | the 3 company blurbs (`bvs.md`, `staffbase.md`, `10SPD.md`) |
 | prompt rendering on the `Prompt` model (`Prompt.render`) | the `header` prompt |
 | parent/child wiring via `Prompt.parent` | — |
@@ -59,23 +59,23 @@ rendering are code. The only DB-driven values are the provider rows a prompt is 
 ```
 Application.save()  --(transaction.on_commit)-->  celery task `generate_prompts`
                                                             |
-        collect_inputs() + prepare_prompts()   [sync: DB + file reads, Prompt rows upserted
-                                                    with template, parent and provider]
+        collect_inputs() + prepare_prompts()   [DB + file reads, Prompt rows upserted
+                                                 with template, parent and provider]
                                                             |
-                                      asyncio.run(run_pipeline())  [async: LLM only]
-                                        stage 0: job_analysis  (cheap provider, structured output)
-                                        stage 1: csl           (cheap provider, list output, consumes parent)
+                                          run_pipeline()   [series, one prompt at a time]
+                                            stage 0: job_analysis  (cheap provider, structured output)
+                                            stage 1: csl           (cheap provider, list output, consumes parent)
                                                             |
-                                    persist_results()  [sync: DB writes]
+                                        persist_results()  [DB writes]
 ```
 
 Each prompt calls its own provider through `Prompt.render()`:
 
 ```
 prompt.render(deps, **context)
-  -> render_template(self.template, **context)   # services.py -> description
-  -> build_agent(self, deps)                     # ai.py -> model from self.provider + spec output_type/tools
-  -> await agent.run(self.description)           # pydantic-ai
+  -> render_template(self.template, **context)      # services.py -> description
+  -> build_agent(self, deps)                        # ai.py -> model from self.provider + spec output_type/tools
+  -> agent.run_sync(self.description, deps=deps)    # pydantic-ai, synchronous
   -> self.response = self.format_response(result.output)
 ```
 
@@ -103,6 +103,10 @@ def build_model(name, url, headers) -> Model:
 
     `name` is the model id sent to the API, `url` the OpenAI-compatible base
     url, `headers` the HTTP headers (including `Authorization: Bearer <key>`).
+
+    The client is async because pydantic-ai's provider layer is async even
+    when the agent is driven with `run_sync`. Build it once per provider and
+    reuse it.
     """
     headers = dict(headers or {})
     api_key = headers.pop("Authorization", "").removeprefix("Bearer ").strip()
@@ -133,16 +137,16 @@ class Prompt(models.Model):
     )
     error = models.TextField(null=True, blank=True)
 
-    async def render(self, deps, **context) -> str:
+    def render(self, deps, **context) -> str:
         """Template the description, ask the provider, and store the response.
 
-        The instance is mutated in memory only — the caller saves it, because
-        Django ORM calls are not allowed inside the event loop.
+        The instance is mutated in memory only — the caller saves it once the
+        whole pipeline is done.
         """
         from .ai import build_agent  # local import: ai.py imports models.py
 
         self.description = render_template(self.template, **context)
-        result = await build_agent(self, deps).run(self.description)
+        result = build_agent(self, deps).run_sync(self.description, deps=deps)
         self.response = self.format_response(result.output)
         return self.response
 
@@ -168,8 +172,8 @@ class Prompt(models.Model):
 - `template` is a new column: each row records which template produced it, so the admin shows the source
   alongside the rendered text.
 - The pipeline upserts the `Prompt` rows first (template + `parent` + `provider`), then calls
-  `await prompt.render(deps, **context)` during the run, and saves `description` + `response` together at the
-  end. One render per prompt, no duplication between "text sent to the model" and "text stored for review".
+  `prompt.render(deps, **context)` for each prompt in turn, and saves `description` + `response` together at
+  the end. One render per prompt, no duplication between "text sent to the model" and "text stored for review".
 
 ### Provider resolution
 
@@ -230,19 +234,18 @@ class JobAnalysis(BaseModel):
 - Stages: stage 0 is the parent; stage 1 depends only on the parent; stage 2 depends on stage-1 siblings
   (the `header` prompt consumes the blurbs). The example implements stage 0 and one stage-1 child.
 
-### Tool design (no DB access inside the coroutine)
+### Tool design (no DB access inside tools)
 
-All supporting documents and provider rows are read *synchronously* before `asyncio.run`, then passed into
-the coroutine as `deps`:
+All supporting documents and provider rows are read up front, then handed to the agents as `deps`:
 
 ```python
 @dataclass
 class PipelineDeps:
     """Everything the agents may read.
 
-    Collected synchronously before the event loop starts, so no tool ever
-    touches the DB or the filesystem. `work_summaries` is filled in between
-    stages for prompts that consume sibling output.
+    Collected before the pipeline starts, so no tool ever touches the DB or
+    the filesystem. `work_summaries` is filled in between stages for prompts
+    that consume sibling output.
     """
     job_description: str
     company: str
@@ -258,25 +261,31 @@ Tools read from `deps`, never from the DB:
 - `@agent.tool get_job_history(company_key)` -> blurb agents (yours)
 - `@agent.tool get_work_summaries()` -> header agent, reads `deps.work_summaries` (yours)
 
-### Async task
+The tools are plain synchronous functions — pydantic-ai runs them in a worker thread, so they must not touch
+the database either (a sync ORM call inside a running event loop raises `SynchronousOnlyOperation`).
+
+### Task (synchronous)
 
 ```python
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_prompts(self, application_id: int, force: bool = False):
-    deps = collect_inputs(application_id)          # sync reads (DB + files)
-    prompts = prepare_prompts(application_id)      # sync: upsert Prompt rows (template, parent, provider)
-    results = asyncio.run(run_pipeline(deps, prompts))  # async: LLM calls only
-    persist_results(prompts, results)              # sync writes
+    deps = collect_inputs(application_id)          # DB + file reads
+    prompts = prepare_prompts(application_id)      # upsert Prompt rows (template, parent, provider)
+    results = run_pipeline(deps, prompts)          # series: one prompt at a time
+    persist_results(prompts, results)              # DB writes
 ```
 
-- Celery tasks are sync -> `asyncio.run` inside the task; the `httpx` client is created *inside* the coroutine
-  (event-loop affinity).
-- Django ORM is never touched inside the coroutine (avoids `SynchronousOnlyOperation`). In-memory model
-  mutation is fine, which is how `Prompt.render()` is used during the run — it renders, calls the provider and
-  sets `description`/`response` on the instance, and `persist_results()` does the actual `save()` afterwards.
-- Concurrency bounded by an `asyncio.Semaphore` (default 4).
-- Per-prompt failure -> that prompt's `response` stays empty and `Prompt.error` is set; the rest still persist.
-  Use `asyncio.gather(..., return_exceptions=True)` so one failure does not sink the stage.
+- Everything is synchronous: `Prompt.render()` uses `agent.run_sync(...)`, and the pipeline calls the prompts
+  one after another, in stage order.
+- No `asyncio`, no `asyncio.run`, no semaphore, no `gather` — the run loop is a plain `for` loop.
+- `run_sync` cannot be called from inside a running event loop, so the task must run in a synchronous context
+  (a Celery worker or the Django shell). Calling the pipeline from async code would need `run` instead.
+
+- Per-prompt failure -> that prompt's `response` stays empty and `Prompt.error` is set; the run continues with
+  the next prompt. A plain `try`/`except` around each `prompt.render()` call is enough.
+- The provider's `httpx.AsyncClient` is still async under the hood — pydantic-ai's provider layer is async even
+  when you call `run_sync`. Build the model once per provider per task run (a small dict cache) so prompts that
+  share a provider share one client and its connection pool.
 
 ### Output contract (snippet model preserved)
 
@@ -312,8 +321,9 @@ def generate_prompts(self, application_id: int, force: bool = False):
      `default=PromptProvider.get_default_pk()` and deleting that helper;
    - add `Prompt.template = models.CharField(blank=True, default="")` and
      `Prompt.error = models.TextField(null=True, blank=True)`;
-   - add `Prompt.render(deps, **context)` — renders the description, calls the provider bound to the row and
-     stores the response — plus `Prompt.format_response(output)` for the str/list/BaseModel -> text rule;
+   - add `Prompt.render(deps, **context)` — renders the description, calls the provider bound to the row with
+     `run_sync` and stores the response — plus `Prompt.format_response(output)` for the str/list/BaseModel ->
+     text rule;
    - delete the module-level `env` and the `jinja2` import; switch `build_pdf()` to `render_template()`;
    - delete `generate_job_histories_prompts`, `generate_payload_prompt`, `generate_header_prompt`,
      `generate_skills_prompts`, `generate_job_name_prompt`, `generate_all_prompts`;
@@ -321,8 +331,8 @@ def generate_prompts(self, application_id: int, force: bool = False):
    - drop the commented-out `Prompt.provider` block (now live) and keep `Prompt.parent` as-is.
 
 4. **`job_applications/ai.py` (new)** — `JobAnalysis`, `PipelineDeps`, `find_provider`, `ProviderNotConfigured`,
-   `PromptSpec` + `PROMPT_SPECS`, `TOOLS`, `build_agent(prompt, deps)`, `collect_inputs`, `prepare_prompts`,
-   `run_pipeline`, `persist_results`.
+   `PromptSpec` + `PROMPT_SPECS`, `TOOLS`, `build_agent(prompt, deps)`, `build_context(spec, deps, results)`,
+   `collect_inputs`, `prepare_prompts`, `run_pipeline`, `persist_results`.
 
    ```python
    @dataclass(frozen=True)
@@ -356,8 +366,25 @@ def generate_prompts(self, application_id: int, force: bool = False):
    ]
    ```
 
-   The run loop walks `PROMPT_SPECS` by stage; each stage runs concurrently under the semaphore, and a
-   stage-N spec sees the stage N-1 outputs in `results` (and `deps.work_summaries` for the `header` case).
+   The run loop walks `PROMPT_SPECS` by stage and calls each prompt in turn; a stage-N spec sees the stage
+   N-1 outputs in `results` (and `deps.work_summaries` for the `header` case).
+
+   ```python
+   def run_pipeline(deps, prompts) -> dict:
+       """Run every prompt in stage order, one at a time."""
+       results = {}
+       for stage in sorted({spec.stage for spec in PROMPT_SPECS}):
+           for spec in (s for s in PROMPT_SPECS if s.stage == stage):
+               prompt = prompts[spec.name]
+               context = build_context(spec, deps, results)
+               try:
+                   prompt.render(deps, **context)
+                   results[spec.name] = prompt.response
+               except Exception as exc:
+                   prompt.error = str(exc)
+                   logger.exception("prompt %s failed", spec.name)
+       return results
+   ```
 
    ```python
    def build_agent(prompt: Prompt, deps) -> Agent:
@@ -372,9 +399,9 @@ def generate_prompts(self, application_id: int, force: bool = False):
    ```
 
    The pipeline never calls the provider directly: it assigns `prompt.provider` (tier -> provider row) and
-   then calls `await prompt.render(deps, **context)`, which renders, calls and stores.
+   then calls `prompt.render(deps, **context)`, which renders, calls and stores.
 
-5. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (sync wrapper + `asyncio.run`).
+5. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (a plain synchronous task).
 
 6. **`job_applications/admin.py`** — "Regenerate prompts" action dispatches the task with `force=True`;
    show `Prompt.template`, `Prompt.provider` and `Prompt.error`; add `PromptProvider` help text describing
@@ -467,7 +494,14 @@ but changes the output shape, so prefer finishing the prompts.
 7. Dynamic tool registration (`agent.tool(fn)` on an existing agent) must be verified against the installed
    pydantic-ai version; if the direct-call form is not supported, declare the tools with the decorator inside
    each agent factory.
-8. **`Prompt.render()` is async** — it awaits the provider, so it cannot be called from synchronous code. It
-   also mutates the instance in memory only; `persist_results()` does the `save()` outside the event loop.
+8. **`Prompt.render()` is synchronous but not thread-safe** — it calls `agent.run_sync()`, which pydantic-ai
+   refuses to do from inside a running event loop. The pipeline must therefore be called from sync code (a
+   Celery worker, the Django shell, a management command). It also mutates the instance in memory only;
+   `persist_results()` does the `save()`.
 9. **The `provider` FK is nullable** — a prompt row without a provider cannot be rendered. The pipeline
    always sets it; hand-created rows in the admin need one.
+10. **Series execution is slower** — the full prompt set is 11 sequential model calls, so a run takes roughly
+    the sum of the individual latencies (tens of seconds). Fine for a background task; too slow for a request
+    handler. Watch the Celery task time limit if the provider is slow.
+11. **One HTTP client per provider** — build the model once per provider per task run and cache it, otherwise
+    every prompt opens its own connection pool.
