@@ -23,6 +23,7 @@ from .models import (
     URLStatus,
     PromptProvider,
 )
+from .tasks import generate_prompts
 
 
 class ApplicationAdmin(ModelAdmin):
@@ -110,8 +111,8 @@ class ApplicationAdmin(ModelAdmin):
     @action(description="Regenerate prompts")
     def regenerate_prompts(self, request, queryset):
         for application in queryset:
-            application.generate_all_prompts()
-        self.message_user(request, "Prompts regenerated successfully.")
+            generate_prompts.delay(application.pk, force=True)
+        self.message_user(request, "Prompt regeneration queued.")
 
     def prompts_list(self, obj):
         links = [
@@ -125,7 +126,7 @@ class PromptAdmin(ModelAdmin):
     model = Prompt
 
     list_filter_submit = True  # Submit button at the bottom of the filter
-    list_display = ("__str__", "get_trimmed_response")
+    list_display = ("__str__", "template", "provider", "get_trimmed_response")
     list_filter = [
         ("application__company", FieldTextFilter),
     ]
@@ -143,9 +144,12 @@ class PromptAdmin(ModelAdmin):
                 "fields": (
                     "application",
                     "name",
+                    "template",
+                    "provider",
                     "notes",
                     "description",
                     "response",
+                    "error",
                 ),
             },
         ),

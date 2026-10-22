@@ -1,14 +1,12 @@
 from django.conf import settings
-from django.db import models
-from jinja2 import Environment, FileSystemLoader
+from django.db import models, transaction
+from pydantic import BaseModel
 import json
 import base64
 from urllib.parse import urlencode
 
-from .services import FileService, render_pdf
+from .services import FileService, render_pdf, render_template
 
-
-env = Environment(loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager")))
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -89,120 +87,35 @@ class Application(models.Model):
             return f"{self.company} * {self.title} - {self.status}"
         return f"{self.title} - {self.status}"
 
+    def _prompt_inputs_changed(self) -> bool:
+        """Return True when the fields the prompts are built from changed."""
+        if self._state.adding or self.pk is None:
+            return True
+        stored = (
+            Application.objects.filter(pk=self.pk)
+            .values("description", "title", "company")
+            .first()
+        )
+        if stored is None:
+            return True
+        return (
+            stored["description"] != self.description
+            or stored["title"] != self.title
+            or stored["company"] != self.company
+        )
+
     def save(self, **kwargs):
+        dispatch = self._prompt_inputs_changed()
         super().save(**kwargs)
-        self.generate_all_prompts()
+        if dispatch:
+            from .tasks import dispatch_generate_prompts
 
-    def generate_job_histories_prompts(self):
-        for doc in job_histories:
-            tasks_list = read_supporting_document(doc)
-            name = doc.split("/")[-1]
-            template_args = {
-                "job_description": self.description,
-                "job_tasks_list":tasks_list,
-            }
-
-            try:
-                p = self.get_prompt(name)
-                p.description = env.get_template("templates/job_blurb.md").render(**template_args)
-                p.save()
-            except:
-                Prompt(
-                    description=env.get_template("templates/job_blurb.md").render(**template_args),
-                    application=self,
-                    name=name,
-                ).save()
-
-    def generate_payload_prompt(self):
-        try:
-            p = self.get_prompt("csl")
-            p.description = env.get_template("templates/csl.md").render(
-                job_description=self.description,
-            )
-            p.save()
-        except:
-            Prompt(
-                description=env.get_template("templates/csl.md").render(
-                    job_description=self.description,
-                ),
-                application=self,
-                name="csl",
-            ).save()
-
-    def generate_header_prompt(self):
-        jobs = [read_supporting_document(h) for h in job_histories]
-        try:
-            p = self.get_prompt("header")
-            p.description = env.get_template("templates/resume_header.md").render(
-                job_description=self.description,
-                job_histories=jobs,
-            )
-            p.save()
-        except:
-            Prompt(
-                description=env.get_template("templates/resume_header.md").render(
-                    job_description=self.description,
-                    job_histories=jobs,
-                ),
-                application=self,
-                name="header",
-            ).save()
-
-    def generate_skills_prompts(self):
-        for skill_type in skills_types:
-            skills_list = read_supporting_document(
-                f"supporting_documents/{skill_type}_skills.md"
-            )
-            try:
-                p = self.get_prompt(skill_type)
-                p.description = env.get_template("templates/skills_list.md").render(
-                    job_description=self.description,
-                    skill_type=skill_type,
-                    skills_list=skills_list,
-                )
-                p.save()
-            except:
-                Prompt(
-                    description=env.get_template("templates/skills_list.md").render(
-                        job_description=self.description,
-                        skill_type=skill_type,
-                        skills_list=skills_list,
-                        skill_count=4,
-                    ),
-                    application=self,
-                    name=skill_type,
-                ).save()
-
-    def generate_job_name_prompt(self):
-        prompt_name = "job_name"
-        prompt_template = "templates/job_name.md"
-        try:
-            p = self.get_prompt(prompt_name)
-            p.description = env.get_template(prompt_template).render(
-                job_description=self.description,
-            )
-            p.save()
-        except:
-            Prompt(
-                description=env.get_template(prompt_template).render(
-                    job_description=self.description,
-                ),
-                application=self,
-                name=prompt_name,
-                notes="Job order is: BVS - Contracting / Senior Fullstack Engineer, Staffbase - Senior Fullstack Engineer, 10SPD - Software Engineer",
-            ).save()
+            transaction.on_commit(lambda: dispatch_generate_prompts(self.pk))
 
     def list_prompts(self):
         return [
             f"{p.name} >\n{p.description}\n{p.response}\n" for p in self.prompts.all()
         ]
-
-    def generate_all_prompts(self):
-        self.generate_job_histories_prompts()
-        self.generate_header_prompt()
-        self.generate_skills_prompts()
-        self.generate_payload_prompt()
-        self.generate_job_name_prompt()
 
     def get_prompt(self, name, error=True):
         try:
@@ -220,11 +133,13 @@ class Application(models.Model):
         resume = json.loads(
             read_supporting_document("supporting_documents/json-resume.json")
         )
-        breakout = env.get_template("templates/breakout.md").render(
+        breakout = render_template(
+            "templates/breakout.md",
             url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
             base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
         )
-        resume["basics"]["payload"] = env.get_template("templates/payload.html").render(
+        resume["basics"]["payload"] = render_template(
+            "templates/payload.html",
             csl=self.get_prompt("csl").response,
             breakout=breakout,
         )
@@ -292,19 +207,32 @@ class Application(models.Model):
 
 
 class PromptProvider(models.Model):
-    name = models.CharField(blank=False, null=False, unique=True)
-    url = models.URLField(blank=False, null=False)
-    headers = models.JSONField(default=dict, blank=True)
+    name = models.CharField(
+        blank=False,
+        null=False,
+        unique=True,
+        help_text=(
+            "Model id sent to the API, e.g. 'openai/gpt-4.1-mini'. The pipeline "
+            "routes prompts to providers by this name (see CHEAP_MODEL / "
+            "STRONG_MODEL in ai.py)."
+        ),
+    )
+    url = models.URLField(
+        blank=False,
+        null=False,
+        help_text="OpenAI-compatible base URL, e.g. 'https://openrouter.ai/api/v1'.",
+    )
+    headers = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "HTTP headers sent with every request, including "
+            "'Authorization: Bearer <key>'."
+        ),
+    )
 
     def __str__(self):
         return self.name
-
-    @classmethod
-    def get_default_pk(cls):
-        status, _created = cls.objects.get(
-            name="default",
-        )
-        return status.pk
 
 
 class Prompt(models.Model):
@@ -316,6 +244,7 @@ class Prompt(models.Model):
         related_name="prompts",
     )
     name = models.CharField(blank=False, null=False)
+    template = models.CharField(blank=True, default="")
     response = models.TextField(blank=True, null=True)
     parent = models.ForeignKey(
         "self",
@@ -323,20 +252,42 @@ class Prompt(models.Model):
         on_delete=models.SET_NULL,
         related_name="children",
     )
+    provider = models.ForeignKey(
+        PromptProvider,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="prompts",
+    )
     notes = models.TextField(null=True, blank=True)
-    # provider = models.ForeignKey(
-    #     PromptProvider,
-    #     null=False,
-    #     on_delete=models.SET_NULL,
-    #     related_name="prompts",
-    #     default=PromptProvider.get_default_pk(),
-    # )
+    error = models.TextField(null=True, blank=True)
 
     class Meta:
         ordering = ["-id"]
 
     def __str__(self):
         return f"{self.application.company} -> {self.name}"
+
+    def render(self, deps, **context) -> str:
+        """Template the description, ask the provider, and store the response.
+
+        The instance is mutated in memory only — the caller saves it once the
+        whole pipeline is done.
+        """
+        from .ai import build_agent  # local import: ai.py imports models.py
+
+        self.description = render_template(self.template, **context)
+        result = build_agent(self).run_sync(self.description, deps=deps)
+        self.response = self.format_response(result.output)
+        return self.response
+
+    @staticmethod
+    def format_response(output) -> str:
+        """Render a model output into the text stored in ``response``."""
+        if isinstance(output, BaseModel):
+            return output.model_dump_json()
+        if isinstance(output, list):
+            return ", ".join(str(item) for item in output)
+        return str(output)
 
     def get_trimmed_response(self):
         # used in the admin dashboard table

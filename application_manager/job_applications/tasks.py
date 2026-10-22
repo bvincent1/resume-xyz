@@ -1,3 +1,5 @@
+import logging
+
 from django.utils import timezone
 from subprocess import call
 from celery import shared_task
@@ -8,6 +10,9 @@ import requests
 from pyppeteer import connect
 from datetime import timedelta
 from django.conf import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 # @shared_task
@@ -22,6 +27,36 @@ from django.conf import settings
 #             print(prompt.description)
 #     app.status = ApplicationStatus.objects.get(name__exact="ready")
 #     app.save()
+
+
+def dispatch_generate_prompts(application_id: int) -> None:
+    """Best-effort dispatch of the prompt pipeline.
+
+    Called from `Application.save()` on commit, so a broker that is down must
+    not break the admin save.
+    """
+    try:
+        generate_prompts.delay(application_id)
+    except Exception:
+        logger.warning(
+            "could not dispatch generate_prompts for application %s",
+            application_id,
+            exc_info=True,
+        )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def generate_prompts(self, application_id: int, force: bool = False):
+    """Run the prompt pipeline for one application, synchronously."""
+    from . import ai
+
+    try:
+        deps = ai.collect_inputs(application_id)
+        prompts = ai.prepare_prompts(application_id)
+        ai.run_pipeline(deps, prompts, force=force)
+        ai.persist_results(prompts)
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
 
 @shared_task

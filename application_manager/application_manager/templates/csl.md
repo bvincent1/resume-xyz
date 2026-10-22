@@ -3,4 +3,9 @@ Given the following job description:
 {{ job_description }}
 """
 
-generate ONLY a COMMA SEPARATED LIST of it's keywords and include related terms or keywords
+and the following keywords already extracted from it:
+"""
+{{ job_analysis.keywords | join(', ') }}
+"""
+
+Return a list of the posting's keywords, including related terms or keywords.
