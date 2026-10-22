@@ -1,11 +1,27 @@
-# Posting -> Resume pipeline (v2)
+# Posting -> Resume pipeline (v2) — example implementation
 
 Status: planned, not started.
 Source brief: `docs/feats/posting-to-resume-breakdown.md`
 
-## Goal
+Implements: the plumbing plus **2 of 11 prompts** (`job_analysis` parent + `csl` child) as a worked example.
+The remaining 9 prompts are left to you — see [Adding the remaining prompts](#adding-the-remaining-prompts-your-part).
 
-Create a pipeline that combines job application information and AI to optimize resume data.
+## Scope of this plan
+
+| Built here | Left to you |
+| --- | --- |
+| `pydantic-ai` dependency, provider resolution, model tiers | the `job_name` prompt |
+| the async celery task, semaphore, error capture | the 4 skills prompts (`frontend`, `backend`, `database`, `infrastructure`) |
+| `PipelineDeps` + the tool pattern | the 3 company blurbs (`bvs.md`, `staffbase.md`, `10SPD.md`) |
+| prompt rendering on the `Prompt` model (`Prompt.render`) | the `header` prompt |
+| parent/child wiring via `Prompt.parent` | — |
+| auto-dispatch on `Application.save()`, admin action, management command | — |
+| `job_analysis` (parent) and `csl` (one child) | — |
+| tests with a stubbed model | — |
+
+Why two prompts and not one: `job_analysis`'s only purpose is to feed children. A parent with no child
+produces no change to the resume and leaves the typed-data handoff unproven. `csl` is the cheapest child
+that exercises the whole path (parent data -> child agent -> `Prompt.response` -> `build_pdf()` input).
 
 ## Decisions taken (with user)
 
@@ -13,18 +29,19 @@ Create a pipeline that combines job application information and AI to optimize r
 | --- | --- |
 | Provider config | Pull provider details from the `PromptProvider` model in `job_applications/models.py`. Models are added ad hoc in the admin; code only looks one up by its `name`. |
 | Prompt text source | Keep the Jinja templates in `application_manager/templates/`. |
+| Prompt rendering | Lives on the `Prompt` model (`Prompt.render`), not in a standalone function. |
 | Trigger | Auto-dispatch on Application create/update. |
 | AI output scope | Keep the snippet model: AI fills the existing `Prompt` rows, `build_pdf()` is unchanged. |
 
 Note on the brief's "no dynamic or external configs, just functions inside task(s)" criterion: this is satisfied
 in the sense that no *new* config surface is introduced. Prompt-to-model routing, provider resolution and
-prompt rendering are plain functions in `job_applications/ai.py`. The single DB-driven lookup is provider
-credentials/endpoints, per the decision above.
+prompt rendering are code. The single DB-driven lookup is provider credentials/endpoints, per the decision above.
 
 ## Current state (as of `379637fd`)
 
 - `Application.save()` -> `generate_all_prompts()` renders Jinja templates into `Prompt` rows with an empty
   `response`; a human pastes the answer into the admin. Nothing calls an LLM today.
+- Rendering happens in `Application.generate_*_prompts()` via the module-level Jinja `env` in `models.py`.
 - `Application.build_pdf()` splices `Prompt.response` values into `supporting_documents/json-resume.json`
   and POSTs it to `json-resume-api`.
 - `Prompt.parent` (self FK) already exists and is unused — it is the hook for parent/child prompt data.
@@ -39,15 +56,39 @@ credentials/endpoints, per the decision above.
 ```
 Application.save()  --(transaction.on_commit)-->  celery task `generate_prompts`
                                                             |
-                                    collect_inputs()  [sync: DB + file reads]
+        collect_inputs() + prepare_prompts()   [sync: DB + file reads, Prompt rows upserted]
                                                             |
                                       asyncio.run(run_pipeline())  [async: LLM only]
-                                        1. parent: job_analysis  (cheap model, structured output)
-                                        2. children, concurrent (blurbs use strong model)
-                                        3. header consumes sibling blurbs (strong model)
+                                        stage 0: job_analysis  (cheap model, structured output)
+                                        stage 1: csl           (cheap model, list output, consumes parent)
                                                             |
                                     persist_results()  [sync: DB writes]
 ```
+
+### Prompt rendering lives on the Prompt model
+
+`Prompt` owns its own rendering, so the pipeline never calls a free function to build a prompt:
+
+```python
+class Prompt(models.Model):
+    template = models.CharField(blank=True, default="")
+    description = models.TextField(blank=False, null=False)
+    ...
+
+    def render(self, **context) -> str:
+        """Render this prompt's template into `description` and return it."""
+        self.description = env.get_template(self.template).render(**context)
+        return self.description
+```
+
+- `env` is the module-level Jinja `Environment` already defined in `models.py`
+  (`FileSystemLoader(settings.BASE_DIR / "application_manager")`), so templates stay addressed as
+  `templates/csl.md`.
+- `template` is a new column: each row records which template produced it, so the admin shows the source
+  alongside the rendered text.
+- The pipeline upserts the `Prompt` rows first (template + `parent` FK), then calls `prompt.render(**context)`
+  on the in-memory instance during the run, and saves `description` + `response` together at the end. One
+  render per prompt, no duplication between "text sent to the model" and "text stored for review".
 
 ### Provider resolution
 
@@ -75,16 +116,11 @@ def resolve_model(name: str) -> Model:
 ```python
 STRONG_MODEL = "gpt-4.1"       # PromptProvider.name
 CHEAP_MODEL  = "gpt-4.1-mini"  # PromptProvider.name
-
-PROMPT_TIERS = {          # satisfies "delegate simple prompts to cheaper providers"
-    "job_analysis": CHEAP,   # structured extraction
-    "csl": CHEAP,            # keyword list
-    "job_name": CHEAP,       # title
-    "frontend": CHEAP, "backend": CHEAP, "database": CHEAP, "infrastructure": CHEAP,
-    "bvs.md": STRONG, "staffbase.md": STRONG, "10SPD.md": STRONG,  # prose
-    "header": STRONG,        # prose synthesis
-}
 ```
+
+Routing is per prompt spec (see `PromptSpec.tier` below), so extraction/list prompts go to `CHEAP_MODEL`
+and prose prompts go to `STRONG_MODEL`. The example implements two cheap prompts; the strong tier is wired
+but only exercised once you add a prose prompt.
 
 ### Parent -> child data flow
 
@@ -102,8 +138,8 @@ class JobAnalysis(BaseModel):
 - The parent `Prompt` row (`name="job_analysis"`, `response` = JSON dump) is the `parent` of every child row.
 - Children receive the parent's typed object as agent `deps` **and** as Jinja context, so the stored
   `Prompt.description` shows the parent data that fed it.
-- Two-stage run: the three blurbs run concurrently; `header` then consumes the blurbs through the
-  `get_work_summaries()` tool. The remaining children run concurrently with the blurbs.
+- Stages: stage 0 is the parent; stage 1 depends only on the parent; stage 2 depends on stage-1 siblings
+  (the `header` prompt consumes the blurbs). The example implements stage 0 and one stage-1 child.
 
 ### Tool design (no DB access inside the coroutine)
 
@@ -113,34 +149,44 @@ the coroutine as `deps`:
 ```python
 @dataclass
 class PipelineDeps:
+    """Everything the agents may read.
+
+    Collected synchronously before the event loop starts, so no tool ever
+    touches the DB or the filesystem. `work_summaries` is filled in between
+    stages for prompts that consume sibling output.
+    """
     job_description: str
-    histories: dict[str, str]      # {"bvs.md": "<markdown>", ...}
-    skills: dict[str, str]         # {"frontend": "<markdown>", ...}
     company: str
+    histories: dict[str, str] = field(default_factory=dict)
+    skills: dict[str, str] = field(default_factory=dict)
+    work_summaries: dict[str, str] = field(default_factory=dict)
 ```
 
 Tools read from `deps`, never from the DB:
 
-- `@agent.tool get_job_description()` -> parent agent
-- `@agent.tool get_skill_list(skill_type)` -> skills agents
-- `@agent.tool get_job_history(company_key)` -> blurb agents
-- `@agent.tool get_work_summaries()` -> header agent (sibling blurbs = parent -> child flow)
+- `@agent.tool get_job_description()` -> parent agent (implemented in the example)
+- `@agent.tool get_skill_list(skill_type)` -> skills agents (yours)
+- `@agent.tool get_job_history(company_key)` -> blurb agents (yours)
+- `@agent.tool get_work_summaries()` -> header agent, reads `deps.work_summaries` (yours)
 
 ### Async task
 
 ```python
-@shared_task
-def generate_prompts(application_id: int, force: bool = False):
-    inputs = collect_inputs(application_id)      # sync reads (DB + files)
-    results = asyncio.run(run_pipeline(inputs))  # async: LLM calls only
-    persist_results(application_id, results)      # sync writes
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def generate_prompts(self, application_id: int, force: bool = False):
+    deps = collect_inputs(application_id)          # sync reads (DB + files)
+    prompts = prepare_prompts(application_id)      # sync: upsert Prompt rows (template, parent)
+    results = asyncio.run(run_pipeline(deps, prompts))  # async: LLM calls only
+    persist_results(prompts, results)              # sync writes
 ```
 
 - Celery tasks are sync -> `asyncio.run` inside the task; the `httpx` client is created *inside* the coroutine
   (event-loop affinity).
-- Django ORM is never touched inside the coroutine (avoids `SynchronousOnlyOperation`).
-- Concurrency bounded by an `asyncio.Semaphore` (default 4) so one application does not fan out 9 calls.
+- Django ORM is never touched inside the coroutine (avoids `SynchronousOnlyOperation`). In-memory model
+  mutation is fine, which is how `Prompt.render()` is used during the run.
+- Concurrency bounded by an `asyncio.Semaphore` (default 4).
 - Per-prompt failure -> that prompt's `response` stays empty and `Prompt.error` is set; the rest still persist.
+  Use `asyncio.gather(..., return_exceptions=True)` so one failure does not sink the stage.
 
 ### Output contract (snippet model preserved)
 
@@ -148,6 +194,7 @@ def generate_prompts(application_id: int, force: bool = False):
   `csl`/skills -> `build_pdf()` is unchanged.
 - Structure is still enforced at generation time by `output_type=list[str]`, then joined for storage.
 - No CSV parsing of free-form text, no JSON-in-textfield migration.
+- The parent's `response` is the JSON dump of `JobAnalysis` (`model_dump_json()`).
 
 ### Auto-dispatch on save
 
@@ -164,48 +211,140 @@ def generate_prompts(application_id: int, force: bool = False):
    `pydantic-ai-slim = { extras = ["openai"], version = "^2.59" }` (pydantic-ai 2.59.0 current; `httpx` comes
    with the `openai` extra). Keep the existing `openai` dep.
 
-2. **`job_applications/ai.py` (new)** — `JobAnalysis` model, `PipelineDeps`, `resolve_model`, provider-not-configured
-   error, agent builders, tool registrations, prompt tier table, `collect_inputs`, `run_pipeline`,
-   `persist_results`.
-
-3. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (sync wrapper + `asyncio.run`).
-
-4. **`job_applications/models.py`** —
+2. **`job_applications/models.py`** —
+   - add `Prompt.template = models.CharField(blank=True, default="")` and
+     `Prompt.error = models.TextField(null=True, blank=True)`;
+   - add `Prompt.render(**context)` (renders `template` into `description`, returns the text);
    - delete `generate_job_histories_prompts`, `generate_payload_prompt`, `generate_header_prompt`,
      `generate_skills_prompts`, `generate_job_name_prompt`, `generate_all_prompts`;
-   - `save()` -> dispatch task on commit when description/title/company changed;
-   - add `Prompt.error = models.TextField(null=True, blank=True)`;
+   - `save()` -> dispatch the task on commit when description/title/company changed;
    - drop the unused `PromptProvider.get_default_pk()` and the commented-out `Prompt.provider` FK block.
 
-5. **`job_applications/admin.py`** — "Regenerate prompts" action dispatches the task with `force=True`;
-   show `Prompt.error`; add `PromptProvider` help text describing url/headers/name semantics.
+3. **`job_applications/ai.py` (new)** — `JobAnalysis`, `PipelineDeps`, `resolve_model`, `ProviderNotConfigured`,
+   `PromptSpec` + `PROMPT_SPECS`, `TOOLS`, `build_agent`, `collect_inputs`, `prepare_prompts`, `run_pipeline`,
+   `persist_results`.
 
-6. **Templates** — new `templates/job_analysis.md`; extend `job_blurb.md`, `csl.md`, `job_name.md`,
-   `skills_list.md`, `resume_header.md` with parent-context vars.
+   ```python
+   @dataclass(frozen=True)
+   class PromptSpec:
+       name: str
+       template: str
+       tier: str                       # "cheap" | "strong"
+       output_type: Any
+       parent: str | None = None       # name of the parent prompt
+       stage: int = 1                  # 0 = parent, 1 = needs parent, 2 = needs stage-1 siblings
+       tools: tuple[str, ...] = ()
+       template_vars: dict[str, Any] = field(default_factory=dict)
+
+   PROMPT_SPECS: list[PromptSpec] = [
+       PromptSpec(
+           name="job_analysis",
+           template="templates/job_analysis.md",
+           tier="cheap",
+           output_type=JobAnalysis,
+           stage=0,
+           tools=("get_job_description",),
+       ),
+       PromptSpec(
+           name="csl",
+           template="templates/csl.md",
+           tier="cheap",
+           output_type=list[str],
+           parent="job_analysis",
+           stage=1,
+       ),
+   ]
+   ```
+
+   The run loop walks `PROMPT_SPECS` by stage; each stage runs concurrently under the semaphore, and a
+   stage-N spec sees the stage N-1 outputs in `results` (and `deps.work_summaries` for the `header` case).
+
+4. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (sync wrapper + `asyncio.run`).
+
+5. **`job_applications/admin.py`** — "Regenerate prompts" action dispatches the task with `force=True`;
+   show `Prompt.template` and `Prompt.error`; add `PromptProvider` help text describing url/headers/name
+   semantics.
+
+6. **Templates** — new `templates/job_analysis.md`; extend `templates/csl.md` with the parent-context vars
+   (the other templates are yours to extend).
 
 7. **Management command** — replace `rengen_prompts.py` with `generate_prompts.py` (dispatch the task);
    update the `prompts:` target in `application_manager/Makefile` to `generate_prompts`.
 
-8. **Migration** — `Prompt.error`.
+8. **Migration** — `Prompt.template`, `Prompt.error`.
 
-9. **Tests** — `job_applications/tests.py` (currently an empty stub): pipeline test with pydantic-ai's
-   `FunctionModel`/`TestModel` — asserts the parent runs first, children receive the parent data,
-   `Prompt.parent` is set, and cheap/strong routing picks the right provider row. No network, no API key.
+9. **Tests** — `job_applications/tests.py` (currently an empty stub): pipeline test with a stubbed model
+   (`pydantic_ai.models.test.TestModel` / `FunctionModel`, monkeypatched over `ai.resolve_model`) — asserts
+   the parent row is created first, the child's `parent` FK points at it, the child's rendered description
+   contains the parent's data, the child's response is comma-joined, and the cheap tier was used. No network,
+   no API key.
+
+## Adding the remaining prompts (your part)
+
+For each prompt:
+
+1. **Template** — write `templates/<name>.md`. Keep the current prompt text as the base and add the parent
+   context vars you need (`{{ job_analysis.responsibilities | join('; ') }}`,
+   `{{ job_analysis.keywords | join(', ') }}`, ...).
+2. **Spec** — add a `PromptSpec` to `PROMPT_SPECS`: name, template, tier (`"cheap"` for extraction/lists,
+   `"strong"` for prose), `output_type` (`list[str]`, `str`, or a `BaseModel`), `parent` (`"job_analysis"`),
+   `stage` (1 unless it consumes siblings), `tools`, and `template_vars` (e.g. `{"skill_type": "frontend"}`).
+3. **Tool** — if the prompt needs a document, add a tool to `TOOLS` that reads it from `PipelineDeps`.
+4. **Response shape** — `str` -> prose, `list[str]` -> comma-joined, `BaseModel` -> JSON dump. `build_pdf()`
+   expects prose for `header`/blurb/`job_name` and comma-separated for `csl`/skills.
+
+Remaining prompts, with the values to use:
+
+| prompt | tier | output_type | template | tools | stage |
+| --- | --- | --- | --- | --- | --- |
+| `job_name` | cheap | `str` | `templates/job_name.md` | — | 1 |
+| `frontend` | cheap | `list[str]` | `templates/skills_list.md` | `get_skill_list` | 1 |
+| `backend` | cheap | `list[str]` | `templates/skills_list.md` | `get_skill_list` | 1 |
+| `database` | cheap | `list[str]` | `templates/skills_list.md` | `get_skill_list` | 1 |
+| `infrastructure` | cheap | `list[str]` | `templates/skills_list.md` | `get_skill_list` | 1 |
+| `bvs.md` | strong | `str` | `templates/job_blurb.md` | `get_job_history` | 1 |
+| `staffbase.md` | strong | `str` | `templates/job_blurb.md` | `get_job_history` | 1 |
+| `10SPD.md` | strong | `str` | `templates/job_blurb.md` | `get_job_history` | 1 |
+| `header` | strong | `str` | `templates/resume_header.md` | `get_work_summaries` | 2 |
+
+Notes for the tricky ones:
+
+- The skills prompts share one template, so the skill type must reach the template: put it in
+  `template_vars` (`{"skill_type": "frontend"}`) and use it in the template body.
+- The blurbs share one template; bind the company via `template_vars` (`{"company_key": "bvs.md"}`) so the
+  `get_job_history` tool returns the right document deterministically.
+- `header` runs in stage 2: after stage 1 completes, fill `deps.work_summaries` with the finished blurbs so
+  `get_work_summaries()` can return them. `Prompt.parent` stays `job_analysis` for every child — the FK is
+  single-valued and the blurbs are siblings of `header`, not its parent.
+
+## Known consequence of the partial implementation
+
+`build_pdf()` reads `header`, `csl`, the 4 skill prompts and the 3 blurb prompts, and raises when a prompt is
+missing (`get_prompt()` throws). Until the remaining 9 prompts are implemented, PDF generation for an
+application will fail on the missing prompts. Either implement them first, or make `build_pdf()` skip missing
+prompts (`get_prompt(name, error=False)` already supports that) — the latter is a one-line-per-prompt change
+but changes the output shape, so prefer finishing the prompts.
 
 ## Acceptance criteria mapping
 
-| Criterion | How |
-| --- | --- |
-| pydantic_ai for prompting + tool management | `Agent` per prompt type with `output_type`, `@agent.tool` for `get_job_description` / `get_skill_list` / `get_job_history` / `get_work_summaries` |
-| no dynamic or external configs, just functions inside task(s) | routing table + provider resolution + prompt rendering are plain functions in `job_applications/ai.py`; the only DB-driven piece is provider credentials/endpoints, per the decision above |
-| delegate simple / basic prompts to cheaper providers | `PROMPT_TIERS` sends extraction/list prompts to `CHEAP_MODEL`, prose to `STRONG_MODEL` |
+| Criterion | How | Demonstrated by the example |
+| --- | --- | --- |
+| pydantic_ai for prompting + tool management | `Agent` per prompt with `output_type`, `@agent.tool` for `get_job_description` | yes |
+| no dynamic or external configs, just functions inside task(s) | tier routing, provider resolution and rendering are code; the only DB-driven lookup is provider credentials/endpoints | yes |
+| delegate simple / basic prompts to cheaper providers | `PromptSpec.tier` sends extraction/list prompts to `CHEAP_MODEL`, prose to `STRONG_MODEL` | cheap tier yes; strong tier wired, exercised once you add a prose prompt |
 
 ## Risks / open items
 
 1. **OpenAI-compatible wire format assumption** for all `PromptProvider` rows — a native Anthropic endpoint will
    not work. Would need a `kind` column if that changes.
-2. **Cost per application** ~ 1 cheap parent + 4 cheap children + 3 strong blurbs + 1 strong header = ~9 calls.
-   Auto-dispatch on every description edit multiplies that.
-3. `Prompt.description` now embeds parent data, so it gets long in the admin view.
-4. The task upserts `Prompt` rows by name, matching today's `get_prompt` behaviour.
-5. Existing `Prompt.response` rows keep their current format; no data migration needed.
+2. **`STRONG_MODEL`/`CHEAP_MODEL` are code constants** that must match `PromptProvider.name` values; a missing
+   row raises `ProviderNotConfigured` listing the configured names.
+3. **Cost** — the example costs 2 calls per application (~1 cheap parent + 1 cheap child); the full set is
+   ~11. Auto-dispatch on every description edit multiplies that.
+4. `Prompt.description` now embeds parent data, so it gets long in the admin view.
+5. The pipeline upserts `Prompt` rows by name, matching today's `get_prompt` behaviour; existing rows are
+   updated in place.
+6. Existing `Prompt.response` rows keep their current format; no data migration needed.
+7. Dynamic tool registration (`agent.tool(fn)` on an existing agent) must be verified against the installed
+   pydantic-ai version; if the direct-call form is not supported, declare the tools with the decorator inside
+   each agent factory.
