@@ -41,7 +41,8 @@ prompt rendering are code. The single DB-driven lookup is provider credentials/e
 
 - `Application.save()` -> `generate_all_prompts()` renders Jinja templates into `Prompt` rows with an empty
   `response`; a human pastes the answer into the admin. Nothing calls an LLM today.
-- Rendering happens in `Application.generate_*_prompts()` via the module-level Jinja `env` in `models.py`.
+- Rendering happens in `Application.generate_*_prompts()` via the module-level Jinja `env` in `models.py`
+  (that `env` moves to `services.py` in this plan).
 - `Application.build_pdf()` splices `Prompt.response` values into `supporting_documents/json-resume.json`
   and POSTs it to `json-resume-api`.
 - `Prompt.parent` (self FK) already exists and is unused — it is the hook for parent/child prompt data.
@@ -67,9 +68,29 @@ Application.save()  --(transaction.on_commit)-->  celery task `generate_prompts`
 
 ### Prompt rendering lives on the Prompt model
 
-`Prompt` owns its own rendering, so the pipeline never calls a free function to build a prompt:
+The Jinja machinery moves into `job_applications/services.py`, next to the other rendering service
+(`render_pdf`), so there is one place that knows how templates are loaded:
 
 ```python
+# job_applications/services.py
+from django.conf import settings
+from jinja2 import Environment, FileSystemLoader
+
+env = Environment(loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager")))
+
+
+def render_template(template_name, **context) -> str:
+    """Render a Jinja template from the project directory with the given context."""
+    return env.get_template(template_name).render(**context)
+```
+
+`Prompt` owns the call, so the pipeline never calls a free function to build a prompt:
+
+```python
+# job_applications/models.py
+from .services import FileService, render_pdf, render_template
+
+
 class Prompt(models.Model):
     template = models.CharField(blank=True, default="")
     description = models.TextField(blank=False, null=False)
@@ -77,13 +98,15 @@ class Prompt(models.Model):
 
     def render(self, **context) -> str:
         """Render this prompt's template into `description` and return it."""
-        self.description = env.get_template(self.template).render(**context)
+        self.description = render_template(self.template, **context)
         return self.description
 ```
 
-- `env` is the module-level Jinja `Environment` already defined in `models.py`
-  (`FileSystemLoader(settings.BASE_DIR / "application_manager")`), so templates stay addressed as
-  `templates/csl.md`.
+- `models.py` drops its own `env` and the `jinja2` import; `build_pdf()` switches to
+  `render_template("templates/breakout.md", url=..., base_64_url=...)` and
+  `render_template("templates/payload.html", csl=..., breakout=...)`.
+- Templates stay addressed relative to the project directory (`templates/csl.md`), so the loader path is
+  unchanged from today.
 - `template` is a new column: each row records which template produced it, so the admin shows the source
   alongside the rendered text.
 - The pipeline upserts the `Prompt` rows first (template + `parent` FK), then calls `prompt.render(**context)`
@@ -211,16 +234,20 @@ def generate_prompts(self, application_id: int, force: bool = False):
    `pydantic-ai-slim = { extras = ["openai"], version = "^2.59" }` (pydantic-ai 2.59.0 current; `httpx` comes
    with the `openai` extra). Keep the existing `openai` dep.
 
-2. **`job_applications/models.py`** —
+2. **`job_applications/services.py`** — add the Jinja environment and the `render_template(template_name,
+   **context)` helper (moved out of `models.py`), alongside `render_pdf` and `FileService`.
+
+3. **`job_applications/models.py`** —
    - add `Prompt.template = models.CharField(blank=True, default="")` and
      `Prompt.error = models.TextField(null=True, blank=True)`;
-   - add `Prompt.render(**context)` (renders `template` into `description`, returns the text);
+   - add `Prompt.render(**context)` — delegates to `render_template()` from `.services`;
+   - delete the module-level `env` and the `jinja2` import; switch `build_pdf()` to `render_template()`;
    - delete `generate_job_histories_prompts`, `generate_payload_prompt`, `generate_header_prompt`,
      `generate_skills_prompts`, `generate_job_name_prompt`, `generate_all_prompts`;
    - `save()` -> dispatch the task on commit when description/title/company changed;
    - drop the unused `PromptProvider.get_default_pk()` and the commented-out `Prompt.provider` FK block.
 
-3. **`job_applications/ai.py` (new)** — `JobAnalysis`, `PipelineDeps`, `resolve_model`, `ProviderNotConfigured`,
+4. **`job_applications/ai.py` (new)** — `JobAnalysis`, `PipelineDeps`, `resolve_model`, `ProviderNotConfigured`,
    `PromptSpec` + `PROMPT_SPECS`, `TOOLS`, `build_agent`, `collect_inputs`, `prepare_prompts`, `run_pipeline`,
    `persist_results`.
 
@@ -259,21 +286,21 @@ def generate_prompts(self, application_id: int, force: bool = False):
    The run loop walks `PROMPT_SPECS` by stage; each stage runs concurrently under the semaphore, and a
    stage-N spec sees the stage N-1 outputs in `results` (and `deps.work_summaries` for the `header` case).
 
-4. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (sync wrapper + `asyncio.run`).
+5. **`job_applications/tasks.py`** — add the `generate_prompts` celery task (sync wrapper + `asyncio.run`).
 
-5. **`job_applications/admin.py`** — "Regenerate prompts" action dispatches the task with `force=True`;
+6. **`job_applications/admin.py`** — "Regenerate prompts" action dispatches the task with `force=True`;
    show `Prompt.template` and `Prompt.error`; add `PromptProvider` help text describing url/headers/name
    semantics.
 
-6. **Templates** — new `templates/job_analysis.md`; extend `templates/csl.md` with the parent-context vars
+7. **Templates** — new `templates/job_analysis.md`; extend `templates/csl.md` with the parent-context vars
    (the other templates are yours to extend).
 
-7. **Management command** — replace `rengen_prompts.py` with `generate_prompts.py` (dispatch the task);
+8. **Management command** — replace `rengen_prompts.py` with `generate_prompts.py` (dispatch the task);
    update the `prompts:` target in `application_manager/Makefile` to `generate_prompts`.
 
-8. **Migration** — `Prompt.template`, `Prompt.error`.
+9. **Migration** — `Prompt.template`, `Prompt.error`.
 
-9. **Tests** — `job_applications/tests.py` (currently an empty stub): pipeline test with a stubbed model
+10. **Tests** — `job_applications/tests.py` (currently an empty stub): pipeline test with a stubbed model
    (`pydantic_ai.models.test.TestModel` / `FunctionModel`, monkeypatched over `ai.resolve_model`) — asserts
    the parent row is created first, the child's `parent` FK points at it, the child's rendered description
    contains the parent's data, the child's response is comma-joined, and the cheap tier was used. No network,
