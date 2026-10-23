@@ -1,12 +1,16 @@
-from django.conf import settings
 from django.db import models, transaction
 from pydantic import BaseModel
+
 import json
 import base64
 from urllib.parse import urlencode
 
-from .services import FileService, render_pdf, render_template
-
+from .services import (
+    generate_pdf,
+    read_supporting_document,
+    render_string,
+    render_template,
+)
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -21,17 +25,6 @@ skills_types = [
     "database",
     "infrastructure",
 ]
-
-
-def read_supporting_document(path):
-    """Read a supporting document from the local filesystem.
-
-    ``path`` mirrors the S3 key previously used and is relative to the Django
-    project directory, e.g. ``supporting_documents/histories/bvs.md``.
-    """
-    return (settings.BASE_DIR / "application_manager" / path).read_text(
-        encoding="utf-8"
-    )
 
 
 class ApplicationStatus(models.Model):
@@ -197,7 +190,7 @@ class Application(models.Model):
         if not self.include_databricks:
             del resume["certificates"][1]
 
-        self.resume_url = render_pdf(resume)
+        self.resume_url = generate_pdf(resume)
         self.save()
 
         return self.resume_url
@@ -233,6 +226,9 @@ class PromptProvider(models.Model):
 
     def __str__(self):
         return self.name
+
+    def render_headers(self):
+        return json.loads(render_string(json.dumps(self.headers)))
 
 
 class Prompt(models.Model):
