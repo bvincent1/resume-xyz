@@ -1,14 +1,16 @@
-from django.conf import settings
+import os
+
 from django.db import models
-from jinja2 import Environment, FileSystemLoader
 import json
 import base64
 from urllib.parse import urlencode
 
-from .services import FileService, render_pdf
-
-
-env = Environment(loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager")))
+from .services import (
+    generate_pdf,
+    read_supporting_document,
+    render_string,
+    render_template,
+)
 
 job_histories = [
     "supporting_documents/histories/bvs.md",
@@ -23,17 +25,6 @@ skills_types = [
     "database",
     "infrastructure",
 ]
-
-
-def read_supporting_document(path):
-    """Read a supporting document from the local filesystem.
-
-    ``path`` mirrors the S3 key previously used and is relative to the Django
-    project directory, e.g. ``supporting_documents/histories/bvs.md``.
-    """
-    return (settings.BASE_DIR / "application_manager" / path).read_text(
-        encoding="utf-8"
-    )
 
 
 class ApplicationStatus(models.Model):
@@ -99,16 +90,18 @@ class Application(models.Model):
             name = doc.split("/")[-1]
             template_args = {
                 "job_description": self.description,
-                "job_tasks_list":tasks_list,
+                "job_tasks_list": tasks_list,
             }
 
             try:
                 p = self.get_prompt(name)
-                p.description = env.get_template("templates/job_blurb.md").render(**template_args)
+                p.description = render_template("templates/job_blurb.md", template_args)
                 p.save()
             except:
                 Prompt(
-                    description=env.get_template("templates/job_blurb.md").render(**template_args),
+                    description=render_template(
+                        "templates/job_blurb.md", template_args
+                    ),
                     application=self,
                     name=name,
                 ).save()
@@ -116,14 +109,15 @@ class Application(models.Model):
     def generate_payload_prompt(self):
         try:
             p = self.get_prompt("csl")
-            p.description = env.get_template("templates/csl.md").render(
-                job_description=self.description,
+            p.description = render_template(
+                "templates/csl.md", {"job_description": self.description}
             )
             p.save()
         except:
             Prompt(
-                description=env.get_template("templates/csl.md").render(
-                    job_description=self.description,
+                description=render_template(
+                    "templates/csl.md",
+                    {"job_description": self.description},
                 ),
                 application=self,
                 name="csl",
@@ -133,16 +127,22 @@ class Application(models.Model):
         jobs = [read_supporting_document(h) for h in job_histories]
         try:
             p = self.get_prompt("header")
-            p.description = env.get_template("templates/resume_header.md").render(
-                job_description=self.description,
-                job_histories=jobs,
+            p.description = render_template(
+                "templates/resume_header.md",
+                {
+                    "job_description": self.description,
+                    "job_histories": jobs,
+                },
             )
             p.save()
         except:
             Prompt(
-                description=env.get_template("templates/resume_header.md").render(
-                    job_description=self.description,
-                    job_histories=jobs,
+                description=render_template(
+                    "templates/resume_header.md",
+                    {
+                        "job_description": self.description,
+                        "job_histories": jobs,
+                    },
                 ),
                 application=self,
                 name="header",
@@ -155,19 +155,25 @@ class Application(models.Model):
             )
             try:
                 p = self.get_prompt(skill_type)
-                p.description = env.get_template("templates/skills_list.md").render(
-                    job_description=self.description,
-                    skill_type=skill_type,
-                    skills_list=skills_list,
+                p.description = render_template(
+                    "templates/skills_list.md",
+                    {
+                        "job_description": self.description,
+                        "skill_type": skill_type,
+                        "skills_list": skills_list,
+                    },
                 )
                 p.save()
             except:
                 Prompt(
-                    description=env.get_template("templates/skills_list.md").render(
-                        job_description=self.description,
-                        skill_type=skill_type,
-                        skills_list=skills_list,
-                        skill_count=4,
+                    description=render_template(
+                        "templates/skills_list.md",
+                        {
+                            "job_description": self.description,
+                            "skill_type": skill_type,
+                            "skills_list": skills_list,
+                            "skill_count": 4,
+                        },
                     ),
                     application=self,
                     name=skill_type,
@@ -178,14 +184,20 @@ class Application(models.Model):
         prompt_template = "templates/job_name.md"
         try:
             p = self.get_prompt(prompt_name)
-            p.description = env.get_template(prompt_template).render(
-                job_description=self.description,
+            p.description = render_template(
+                prompt_template,
+                {
+                    "job_description": self.description,
+                },
             )
             p.save()
         except:
             Prompt(
-                description=env.get_template(prompt_template).render(
-                    job_description=self.description,
+                description=render_template(
+                    prompt_template,
+                    {
+                        "job_description": self.description,
+                    },
                 ),
                 application=self,
                 name=prompt_name,
@@ -220,13 +232,19 @@ class Application(models.Model):
         resume = json.loads(
             read_supporting_document("supporting_documents/json-resume.json")
         )
-        breakout = env.get_template("templates/breakout.md").render(
-            url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
-            base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
+        breakout = render_template(
+            "templates/breakout.md",
+            {
+                "url": f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
+                "base_64_url": f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
+            },
         )
-        resume["basics"]["payload"] = env.get_template("templates/payload.html").render(
-            csl=self.get_prompt("csl").response,
-            breakout=breakout,
+        resume["basics"]["payload"] = render_template(
+            "templates/payload.html",
+            {
+                "csl": self.get_prompt("csl").response,
+                "breakout": breakout,
+            },
         )
         resume["basics"]["summary"] = self.get_prompt("header").response
 
@@ -282,7 +300,7 @@ class Application(models.Model):
         if not self.include_databricks:
             del resume["certificates"][1]
 
-        self.resume_url = render_pdf(resume)
+        self.resume_url = generate_pdf(resume)
         self.save()
 
         return self.resume_url
@@ -298,6 +316,9 @@ class PromptProvider(models.Model):
 
     def __str__(self):
         return self.name
+
+    def render_headers(self):
+        return json.loads(render_string(json.dumps(self.headers)))
 
     @classmethod
     def get_default_pk(cls):
