@@ -3,10 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "scripts": {},
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -21,5 +18,8 @@
     "handlebars": "^4.7.10",
     "json-resume": "^1.0.4",
     "puppeteer": "^25.14.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

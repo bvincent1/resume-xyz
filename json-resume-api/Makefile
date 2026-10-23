@@ -6,7 +6,7 @@ install: ## install dependencies
 .PHONY: install
 
 dev: ## run the server
-	@pnpm start
+	@pnpm nodemon src/index.js
 .PHONY: dev
 
 clean: ## remove generated PDFs from the public dir
