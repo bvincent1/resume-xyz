@@ -1,0 +1,116 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+  "basics": {
+    "name": "Ben Vincent",
+    "label": "Problem Solver",
+    "email": "benjc.vincent@gmail.com",
+    "summary": "Senior Software Engineer with proven success shipping testable, reliable, and scalable code that balances trade-offs between correctness and performance. I have experience with mentorship and presentations, as well as collaborations across teams and organizations.",
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "username": "vincent-slashsolve",
+        "url": "https://www.linkedin.com/in/vincent-slashsolve/"
+      },
+      {
+        "network": "Github",
+        "username": "bvincent1",
+        "url": "http://github.com/bvincent1"
+      },
+      {
+        "network": "Gitlab",
+        "username": "bvincent1",
+        "url": "https://gitlab.com/bvincent1"
+      }
+    ]
+  },
+  "work": [
+    {
+      "name": "BVS",
+      "position": "Contracting / Senior Fullstack Engineer",
+      "startDate": "2017-11",
+      "summary": "Collaborated with businesses to integrate ERP software solutions, streamlining operations and improving financial workflows."
+    },
+    {
+      "name": "Staffbase",
+      "position": "Senior Fullstack Engineer",
+      "startDate": "2021-09",
+      "endDate": "2023-12",
+      "summary": "Optimized application architecture to enhance scalability and performance, delivering a faster and more reliable user experience under increased load. Successfully executed flawless rollouts to a user base of 10k with zero downtime."
+    },
+    {
+      "name": "10SPD",
+      "position": "Software Engineer",
+      "startDate": "2018-02",
+      "endDate": "2021-12",
+      "summary": "Lead a team of 4 developing 4 projects in series. Owned everything from feature development, design research, product demos, project scoping, leading sprints, to infrastructure design."
+    },
+    {
+      "name": "Granify",
+      "position": "Junior Software Engineer",
+      "startDate": "2016-04",
+      "endDate": "2017-09"
+    }
+  ],
+  "education": [
+    {
+      "institution": "University of Alberta",
+      "studyType": "Bachelor of Science",
+      "area": "Computer Science",
+      "startDate": "2011-09",
+      "endDate": "2016-05",
+      "score": "3.6 GPA"
+    }
+  ],
+  "awards": [
+    {
+      "title": "Proudfoot Award",
+      "awarder": "St Joseph's College",
+      "date": "2013-03"
+    }
+  ],
+  "certificates": [
+    {
+      "name": "Project Management",
+      "issuer": "Google Coursera",
+      "date": "2024-03-07",
+      "url": "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time?redirect=e2fb9fdc-d30b-4f5e-bc9a-49998b722a3e"
+    },
+    {
+      "name": "Advanced Data Engineering",
+      "issuer": "Databricks",
+      "date": "2024-03"
+    }
+  ],
+  "skills": [
+    {
+      "name": "Frontend",
+      "level": "5",
+      "keywords": ["React", "Javascript", "Typescript", "Dart", "Flutter"]
+    },
+    {
+      "name": "Backend",
+      "level": "5",
+      "keywords": ["Node", "Python", "Django", "Flask", "GraphQL", "Microservices"]
+    },
+    {
+      "name": "Databases",
+      "level": "4",
+      "keywords": ["Postgres", "Mysql", "Redis"]
+    },
+    {
+      "name": "Infrastructure",
+      "level": "4",
+      "keywords": ["Docker", "Kubernetes", "GCP", "AWS"]
+    },
+    {
+      "name": "Project Management",
+      "level": "4",
+      "keywords": ["Agile", "SigmaSix", "Lean"]
+    }
+  ],
+  "meta": {
+    "canonical": "https://raw.githubusercontent.com/jsonresume/resume-schema/v1.0.0/schema.json",
+    "version": "v1.0.0"
+  }
+}
+
