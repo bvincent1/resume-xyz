@@ -12,3 +12,9 @@ dev: ## run the server
 clean: ## remove generated PDFs from the public dir
 	@rm -f public/*.pdf
 .PHONY: clean
+
+prod:
+	@nohup make dev
+	@echo "" > nohup.out
+	@nohup pnpm nodemon src/index.js &
+.PHONY: prod

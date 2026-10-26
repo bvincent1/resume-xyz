@@ -26,6 +26,16 @@ skills_types = [
     "infrastructure",
 ]
 
+# Each prompt key in `skills_types` resolves to a `name` field in the
+# `skills` section of json-resume.json. The values below mirror those names;
+# only "database" differs (the resume entry is titled "Databases").
+SKILL_PROMPT_TO_NAME = {
+    "frontend": "Frontend",
+    "backend": "Backend",
+    "database": "Databases",
+    "infrastructure": "Infrastructure",
+}
+
 
 class ApplicationStatus(models.Model):
     name = models.CharField(blank=False, null=False)
@@ -126,29 +136,51 @@ class Application(models.Model):
         resume = json.loads(
             read_supporting_document("supporting_documents/json-resume.json")
         )
+
+        # Resolve an item in a list section by case-insensitive field match, so
+        # section targeting does not depend on the order of entries in
+        # json-resume.json.
+        def _find(section, **fields):
+            wanted = {k: str(v).lower() for k, v in fields.items()}
+            for item in resume.get(section, []) or []:
+                if all(
+                    str(item.get(k, "")).lower() == v for k, v in wanted.items()
+                ):
+                    return item
+            return None
+
         breakout = render_template(
             "templates/breakout.md",
             url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
             base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
         )
-        resume["basics"]["payload"] = render_template(
-            "templates/payload.html",
-            csl=self.get_prompt("csl").response,
-            breakout=breakout,
-        )
-        resume["basics"]["summary"] = self.get_prompt("header").response
+        if self.get_prompt("csl", False):
+            resume["payload"] = render_template(
+                "templates/payload.html",
+                csl=self.get_prompt("csl").response,
+                breakout=breakout,
+            )
+        if self.get_prompt("header", False) is not None:
+            resume["basics"]["summary"] = self.get_prompt("header").response
 
-        job_name_array = []
-        # job name section
-        if self.get_prompt("job_name", error=False) is not None:
-            job_name_array = self.get_prompt("job_name").response.split(",")
+        # job name section: prompt returns one comma-separated position per
+        # entry in `job_histories`; match each position to a work entry by
+        # `name` (basename of the history file).
+        job_name_prompt = self.get_prompt("job_name", error=False)
+        if job_name_prompt is not None:
+            positions = [p.strip() for p in job_name_prompt.response.split(",")]
+            for history, position in zip(job_histories, positions):
+                if not position:
+                    continue
+                entry = _find(
+                    "work", name=history.split("/")[-1].split(".")[0]
+                )
+                if entry is not None:
+                    entry["position"] = position
 
-        for i in range(len(job_name_array)):
-            if job_name_array[i]:
-                resume["work"][i]["position"] = job_name_array[i]
-
-        ## link section
-
+        # link section: rewrite profile/certificate URLs to the
+        # deuterium.dev redirect, targeting sections by network/issuer rather
+        # than positional index.
         # redirect_map = {
         #     '8d5fa094-0fa1-483a-902f-daf7f6b6ae7d': 'https://www.linkedin.com/in/vincent-slashsolve/',
         #     '8487a51c-7951-4e81-b5be-88ea49c7a4c8': 'https://github.com/bvincent1',
@@ -164,31 +196,54 @@ class Application(models.Model):
         query_params = urlencode(
             {"company": self.company, "method": "resume", "app": self.pk}
         )
-        resume["basics"]["profiles"][0]["url"] = f"{linkedin_url}?{query_params}"
 
-        resume["basics"]["profiles"][1]["url"] = f"{github_url}?{query_params}"
+        for profile in resume.get("basics", {}).get("profiles", []):
+            network = (profile.get("network") or "").lower()
+            if network == "linkedin":
+                profile["url"] = f"{linkedin_url}?{query_params}"
+            elif network == "github":
+                profile["url"] = f"{github_url}?{query_params}"
+            elif network == "gitlab":
+                profile["url"] = f"{gitlab_url}?{query_params}"
 
-        resume["basics"]["profiles"][2]["url"] = f"{gitlab_url}?{query_params}"
-
-        resume["certificates"][0]["url"] = f"{coursera_url}?{query_params}"
+        coursera = _find("certificates", issuer="Google Coursera")
+        if coursera is not None:
+            coursera["url"] = f"{coursera_url}?{query_params}"
 
         resume["basics"]["email"] = f"benjc.vincent+{self.pk}@gmail.com"
 
-        for i in range(len(job_histories)):
-            resume["work"][i]["summary"] = self.get_prompt(
-                job_histories[i].split("/")[-1]
-            ).response
+        # work history summaries: match by `name` (basename of the history file).
+        for history in job_histories:
+            prompt_name = history.split("/")[-1]
+            summary_prompt = self.get_prompt(prompt_name, False)
+            if summary_prompt is None:
+                continue
+            entry = _find("work", name=prompt_name.split(".")[0])
+            if entry is not None:
+                entry["summary"] = summary_prompt.response
 
-        for i in range(len(skills_types)):
-            resume["skills"][i]["keywords"] = [
-                k.strip()
-                for k in (self.get_prompt(skills_types[i]).response or "").split(",")
-            ]
+        # skills: match by the `name` declared in json-resume.json; the
+        # `database` prompt resolves to the "Databases" skill (see
+        # SKILL_PROMPT_TO_NAME).
+        for prompt_name in skills_types:
+            keywords_prompt = self.get_prompt(prompt_name, False)
+            if keywords_prompt is None:
+                continue
+            skill = _find("skills", name=SKILL_PROMPT_TO_NAME[prompt_name])
+            if skill is not None:
+                skill["keywords"] = [
+                    k.strip()
+                    for k in (keywords_prompt.response or "").split(",")
+                ]
 
         if not self.include_project_management:
-            del resume["certificates"][0]
+            cert = _find("certificates", name="Project Management")
+            if cert is not None:
+                resume["certificates"].remove(cert)
         if not self.include_databricks:
-            del resume["certificates"][1]
+            cert = _find("certificates", issuer="Databricks")
+            if cert is not None:
+                resume["certificates"].remove(cert)
 
         self.resume_url = generate_pdf(resume)
         self.save()
