@@ -98,7 +98,7 @@ class Application(models.Model):
         )
 
     def save(self, **kwargs):
-        dispatch = self._prompt_inputs_changed()
+        dispatch = False # self._prompt_inputs_changed()
         super().save(**kwargs)
         if dispatch:
             from .tasks import dispatch_generate_prompts
