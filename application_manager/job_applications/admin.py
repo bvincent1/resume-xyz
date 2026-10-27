@@ -90,7 +90,7 @@ class ApplicationAdmin(ModelAdmin):
     ]
 
     actions = ["generate_pdfs", "regenerate_prompts"]
-    actions_detail = ["generate_pdf"]
+    actions_detail = ["generate_pdf", "regenerate_app_prompts"]
 
     @action(
         description="Build PDF",
@@ -108,10 +108,17 @@ class ApplicationAdmin(ModelAdmin):
             application.build_pdf()
         self.message_user(request, "PDFs generated successfully.")
 
+
+    @action(description="Regenerate prompts")
+    def regenerate_app_prompts(self, request, object_id: int):
+        app = Application.objects.get(pk=object_id)
+        generate_prompts.delay(app.pk, force=True)
+        self.message_user(request, "Prompt regeneration queued.")
+
     @action(description="Regenerate prompts")
     def regenerate_prompts(self, request, queryset):
-        for application in queryset:
-            generate_prompts.delay(application.pk, force=True)
+        for app in queryset:
+            generate_prompts.delay(app.pk, force=True)
         self.message_user(request, "Prompt regeneration queued.")
 
     def prompts_list(self, obj):
