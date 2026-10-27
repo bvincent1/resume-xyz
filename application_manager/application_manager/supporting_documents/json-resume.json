@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../json-resume-api/schema.json",
+  "$schema": "https://github.com/bvincent1/resume-xyz/raw/refs/heads/json-resume/json-resume-api/schema.json",
   "basics": {
     "name": "Ben Vincent",
     "label": "Problem Solver",
@@ -9,25 +9,31 @@
       {
         "network": "LinkedIn",
         "username": "vincent-slashsolve",
-        "url": "https://www.linkedin.com/in/vincent-slashsolve/"
+        "url": "https://linkedin.deuterium.dev"
       },
       {
         "network": "Github",
         "username": "bvincent1",
-        "url": "http://github.com/bvincent1"
+        "url": "https://github.deuterium.dev"
       },
       {
         "network": "Gitlab",
         "username": "bvincent1",
-        "url": "https://gitlab.com/bvincent1"
+        "url": "https://gitlab.deuterium.dev"
       }
     ]
   },
   "work": [
     {
+      "name": "Fortra",
+      "position": "Senior Software Engineer",
+      "startDate": "2025-09",
+      "summary": "Manage, design, and build microservices securing and processing trillions of emails as part of the data pipeline team."
+    },
+    {
       "name": "BVS",
-      "position": "Contracting / Senior Fullstack Engineer",
-      "startDate": "2017-11",
+      "position": "Solutions Engineer",
+      "startDate": "2018-11",
       "summary": "Collaborated with businesses to integrate ERP software solutions, streamlining operations and improving financial workflows."
     },
     {
@@ -73,12 +79,12 @@
       "name": "Project Management",
       "issuer": "Google Coursera",
       "date": "2024-03-07",
-      "url": "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time?redirect=e2fb9fdc-d30b-4f5e-bc9a-49998b722a3e"
+      "url": "https://coursera.deuterium.dev"
     },
     {
       "name": "Advanced Data Engineering",
       "issuer": "Databricks",
-      "date": "2024-03"
+      "date": "2025-07-21"
     }
   ],
   "skills": [
@@ -90,7 +96,14 @@
     {
       "name": "Backend",
       "level": "5",
-      "keywords": ["Node", "Python", "Django", "Flask", "GraphQL", "Microservices"]
+      "keywords": [
+        "Node",
+        "Python",
+        "Django",
+        "Flask",
+        "GraphQL",
+        "Microservices"
+      ]
     },
     {
       "name": "Databases",
@@ -104,7 +117,7 @@
     },
     {
       "name": "Project Management",
-      "level": "4",
+      "level": "5",
       "keywords": ["Agile", "SigmaSix", "Lean"]
     }
   ],

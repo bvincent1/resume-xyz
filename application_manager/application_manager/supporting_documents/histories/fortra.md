@@ -1,0 +1,3 @@
+- built email security api for actioning pipeline results in customers' inboxes
+- safely ported legacy data pipeline to the newest version with zero downtime changeover and lowered total processing time while simultaneously reducing computing cost
+- implemented asynchronous pipeline driver improving total input by a factor of 10x 
