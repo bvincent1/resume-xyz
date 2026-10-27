@@ -66,6 +66,7 @@ app.post('/resume', async (req, res, next) => {
     await page.setContent(html, { waitUntil: 'load' });
     await page.pdf({ path: filePath, format: 'A4', printBackground: true });
 
+    console.log({ path: `http://localhost:${port}/${filename}` });
     res.status(201).json({ path: `/${filename}` });
   } catch (err) {
     next(err);
