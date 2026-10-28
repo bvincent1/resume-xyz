@@ -1,0 +1,77 @@
+version: "3.8"
+
+# In this Docker Compose example, we only fire up the services required for local development.
+# This is not advised for production use as it exposes ports to the database insecurely.
+# If you're looking for a production-ready Docker Compose file, check out the `traefik.yml` file.
+
+services:
+  # Database (Postgres)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - 5672:5672
+      - 15672:15672
+    volumes:
+      - data_rabbitmq:/var/lib/rabbitmq/
+
+  # PDF renderer (Express + puppeteer)
+  resume:
+    build:
+      context: ./json-resume-api
+      dockerfile: Dockerfile.node
+    environment:
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  django:
+    build:
+      context: ./application_manager
+      dockerfile: ./Dockerfile.python
+    depends_on:
+      - rabbitmq
+      - resume
+    env_file: ./application_manager/.env
+    environment:
+      RABBITMQ_CLIENT_HOST: rabbitmq
+      RABBITMQ_CLIENT_PORT: 5672
+      RESUME_SERVICE_HOST: http://resume:3000
+    command: /bin/sh -c 'make dev'
+    ports:
+      - "9099:9099"
+
+
+  celery_worker:
+    build:
+      context: ./application_manager
+      dockerfile: ./Dockerfile.python
+    depends_on:
+      - rabbitmq
+    env_file: ./application_manager/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      RABBITMQ_CLIENT_HOST: rabbitmq
+      RABBITMQ_CLIENT_PORT: 5672
+      STORAGE_HOST: http://minio:9000
+    command: /bin/sh -c 'make worker'
+
+  celery_scheduler:
+    build:
+      context: ./application_manager
+      dockerfile: ./Dockerfile.python
+    depends_on:
+      - rabbitmq
+    env_file: ./application_manager/.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      RABBITMQ_CLIENT_HOST: rabbitmq
+      RABBITMQ_CLIENT_PORT: 5672
+      STORAGE_HOST: http://minio:9000
+    command: /bin/sh -c 'make scheduler'
+
+volumes:
+  postgres_data:
+  data_rabbitmq:

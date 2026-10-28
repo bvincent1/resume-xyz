@@ -46,14 +46,13 @@ worker:
 	@$(CELERY) -A application_manager worker -l INFO
 .PHONY: worker
 
-pdfs:
-	@$(DJANGO) generate_pdfs
-.PHONY: pdfs
 
-prompts:
-	@$(DJANGO) generate_prompts
-.PHONY: prompts
-
+tests:
+	@docker run --rm -d --name resume-test-pg \
+		-e POSTGRES_PASSWORD=postgres -p 5459:5432 postgres:16-alpine
+	@POSTGRES_URL="postgres://postgres:postgres@localhost:5459/postgres" \
+		$(DJANGO) test job_applications -v 2
+.PHONY: tests
 
 backup:
 	@pg_dump -a -O -f backup.tar -Ft -d $(DB_CONNECTION)
@@ -61,6 +60,6 @@ backup:
 
 
 prod:
-	@echo "" > nohup.out
-	@nohup $(DJANGO) runserver 0.0.0.0:9099 &
+	@echo "" > application.log
+	@nohup $(DJANGO) runserver 0.0.0.0:9099 > application.log 2>&1 &
 .PHONY: prod
