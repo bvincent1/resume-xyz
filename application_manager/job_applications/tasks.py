@@ -18,13 +18,12 @@ logger = logging.getLogger(__name__)
 def fill_in_prompts():
     from .models import Application, ApplicationStatus
 
-
     app = Application.objects.filter(
         status__exact=ApplicationStatus.objects.get(name__exact="todo").name
     ).last()
-    for prompt in app.prompts.all():
-        if prompt.response is not None:
-            print(prompt.description)
+    prompt = getattr(app, "prompt", None)
+    if prompt is not None and prompt.response is not None:
+        print(prompt.description)
     app.status = ApplicationStatus.objects.get(name__exact="ready")
     app.save()
 
@@ -47,14 +46,11 @@ def dispatch_generate_prompts(application_id: int) -> None:
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_prompts(self, application_id: int, force: bool = False):
-    """Run the prompt pipeline for one application, synchronously."""
+    """Run the single tuning call for one application."""
     from . import ai
 
     try:
-        deps = ai.collect_inputs(application_id)
-        prompts = ai.prepare_prompts(application_id)
-        ai.run_pipeline(deps, prompts, force=force)
-        ai.persist_results(prompts)
+        ai.run_tuning(application_id, force=force)
     except Exception as exc:
         raise self.retry(exc=exc)
 

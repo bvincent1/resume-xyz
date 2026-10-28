@@ -1,197 +1,215 @@
-"""Prompt pipeline: turn a job posting into the `Prompt` rows the resume needs.
+"""Single-call resume tuning pipeline with system-query tools.
 
-The pipeline is synchronous end to end. `Prompt.render()` uses pydantic-ai's
-`run_sync`, so the pipeline must be driven from synchronous code (a Celery
-worker, a management command, the Django shell) — never from inside a running
-event loop.
+The model receives one instruction plus a set of tools that read named
+resources (the application row, supporting documents, the base resume) and
+TinyFish-backed company research. It returns one JSON Resume document, which is
+merged over the base resume, validated against the vendored schema, and stored
+on `Application.tuning`.
 """
 
+import copy
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+import os
+from dataclasses import dataclass
+from datetime import timedelta
+from functools import lru_cache
 
-from pydantic import BaseModel
+import jsonschema
+from django.conf import settings
+from django.utils import timezone
+from jsonschema import FormatChecker
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 
 from . import services
 from .models import (
     Application,
+    Company,
     Prompt,
     PromptProvider,
-    job_histories,
+    SkillType,
+    SKILL_PATHS,
+    SKILL_TYPE_TO_RESUME_NAME,
+    HISTORY_PATHS,
     read_supporting_document,
-    skills_types,
 )
 
 
 logger = logging.getLogger(__name__)
 
 
-# Prompt -> model tier routing (code, not config). These must match a
-# `PromptProvider.name` row; a missing row raises `ProviderNotConfigured`.
-STRONG_MODEL = "gpt-4.1"
-CHEAP_MODEL = "gpt-4.1-mini"
+RESEARCH_TTL = timedelta(days=7)
+RESEARCH_UNAVAILABLE_NO_KEY = (
+    "Company research unavailable (no API key configured)."
+)
 
 
-class ProviderNotConfigured(Exception):
-    """Raised when a tier maps to a `PromptProvider.name` that does not exist."""
-
-    def __init__(self, name: str, configured: list[str]):
-        self.name = name
-        self.configured = configured
-        super().__init__(
-            f"PromptProvider {name!r} is not configured; "
-            f"configured providers: {configured}"
-        )
+# ---------------------------------------------------------------------------
+# JSON Resume model (mirrors json-resume-api/schema.json)
+# ---------------------------------------------------------------------------
 
 
-class JobAnalysis(BaseModel):
-    """Typed output of the parent `job_analysis` prompt."""
+class _PermissiveModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
-    title: str
-    seniority: str
-    responsibilities: list[str]
-    required_skills: list[str]
-    keywords: list[str]
+
+class Location(_PermissiveModel):
+    address: str | None = None
+    postalCode: str | None = None
+    city: str | None = None
+    countryCode: str | None = None
+    region: str | None = None
+
+
+class Profile(_PermissiveModel):
+    network: str | None = None
+    username: str | None = None
+    url: str | None = None
+
+
+class Basics(_PermissiveModel):
+    name: str | None = None
+    label: str | None = None
+    image: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    url: str | None = None
+    summary: str | None = None
+    location: Location | None = None
+    profiles: list[Profile] | None = None
+
+
+class Work(_PermissiveModel):
+    name: str | None = None
+    location: str | None = None
+    description: str | None = None
+    position: str | None = None
+    url: str | None = None
+    startDate: str | None = None
+    endDate: str | None = None
+    summary: str | None = None
+    highlights: list[str] | None = None
+
+
+class Volunteer(_PermissiveModel):
+    organization: str | None = None
+    position: str | None = None
+    url: str | None = None
+    startDate: str | None = None
+    endDate: str | None = None
+    summary: str | None = None
+    highlights: list[str] | None = None
+
+
+class Education(_PermissiveModel):
+    institution: str | None = None
+    url: str | None = None
+    area: str | None = None
+    studyType: str | None = None
+    startDate: str | None = None
+    endDate: str | None = None
+    score: str | None = None
+    courses: list[str] | None = None
+
+
+class Award(_PermissiveModel):
+    title: str | None = None
+    date: str | None = None
+    awarder: str | None = None
+    summary: str | None = None
+
+
+class Certificate(_PermissiveModel):
+    name: str | None = None
+    date: str | None = None
+    url: str | None = None
+    issuer: str | None = None
+
+
+class Publication(_PermissiveModel):
+    name: str | None = None
+    publisher: str | None = None
+    releaseDate: str | None = None
+    url: str | None = None
+    summary: str | None = None
+
+
+class Skill(_PermissiveModel):
+    name: str | None = None
+    level: str | None = None
+    keywords: list[str] | None = None
+
+
+class Language(_PermissiveModel):
+    language: str | None = None
+    fluency: str | None = None
+
+
+class Interest(_PermissiveModel):
+    name: str | None = None
+    keywords: list[str] | None = None
+
+
+class Reference(_PermissiveModel):
+    name: str | None = None
+    reference: str | None = None
+
+
+class Project(_PermissiveModel):
+    name: str | None = None
+    description: str | None = None
+    highlights: list[str] | None = None
+    keywords: list[str] | None = None
+    startDate: str | None = None
+    endDate: str | None = None
+    url: str | None = None
+    roles: list[str] | None = None
+    entity: str | None = None
+    type: str | None = None
+
+
+class Meta(_PermissiveModel):
+    canonical: str | None = None
+    version: str | None = None
+    lastModified: str | None = None
+
+
+class ResumeDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    schema_: str | None = Field(default=None, alias="$schema")
+    basics: Basics | None = None
+    work: list[Work] | None = None
+    volunteer: list[Volunteer] | None = None
+    education: list[Education] | None = None
+    awards: list[Award] | None = None
+    certificates: list[Certificate] | None = None
+    publications: list[Publication] | None = None
+    skills: list[Skill] | None = None
+    languages: list[Language] | None = None
+    interests: list[Interest] | None = None
+    references: list[Reference] | None = None
+    projects: list[Project] | None = None
+    meta: Meta | None = None
+    payload: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class PipelineDeps:
-    """Everything the agents may read.
-
-    Collected before the pipeline starts, so no tool ever touches the DB or the
-    filesystem. `work_summaries` is filled in between stages for prompts that
-    consume sibling output.
-    """
+    """Everything the tools may read."""
 
     job_description: str
     company: str
-    histories: dict[str, str] = field(default_factory=dict)
-    skills: dict[str, str] = field(default_factory=dict)
-    work_summaries: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class PromptSpec:
-    name: str
-    template: str
-    tier: str  # "cheap" | "strong"
-    output_type: Any
-    parent: str | None = None  # name of the parent prompt
-    stage: int = 1  # 0 = parent, 1 = needs parent, 2 = needs stage-1 siblings
-    tools: tuple[str, ...] = ()
-    template_vars: dict[str, Any] = field(default_factory=dict)
-
-
-PROMPT_SPECS: list[PromptSpec] = [
-    PromptSpec(
-        name="job_analysis",
-        template="templates/job_analysis.md",
-        tier="cheap",
-        output_type=JobAnalysis,
-        stage=0,
-        tools=("get_job_description",),
-    ),
-    PromptSpec(
-        name="csl",
-        template="templates/csl.md",
-        tier="cheap",
-        output_type=list[str],
-        parent="job_analysis",
-        stage=1,
-    ),
-    PromptSpec(
-        name="job_name",
-        template="templates/job_name.md",
-        tier="cheap",
-        output_type=str,
-        parent="job_analysis",
-        stage=1,
-    ),
-    PromptSpec(
-        name="frontend",
-        template="templates/skills_list.md",
-        tier="cheap",
-        output_type=list[str],
-        parent="job_analysis",
-        stage=1,
-        tools=("get_skill_list",),
-        template_vars={"skill_type": "frontend"},
-    ),
-    PromptSpec(
-        name="backend",
-        template="templates/skills_list.md",
-        tier="cheap",
-        output_type=list[str],
-        parent="job_analysis",
-        stage=1,
-        tools=("get_skill_list",),
-        template_vars={"skill_type": "backend"},
-    ),
-    PromptSpec(
-        name="database",
-        template="templates/skills_list.md",
-        tier="cheap",
-        output_type=list[str],
-        parent="job_analysis",
-        stage=1,
-        tools=("get_skill_list",),
-        template_vars={"skill_type": "database"},
-    ),
-    PromptSpec(
-        name="infrastructure",
-        template="templates/skills_list.md",
-        tier="cheap",
-        output_type=list[str],
-        parent="job_analysis",
-        stage=1,
-        tools=("get_skill_list",),
-        template_vars={"skill_type": "infrastructure"},
-    ),
-    PromptSpec(
-        name="bvs.md",
-        template="templates/job_blurb.md",
-        tier="strong",
-        output_type=str,
-        parent="job_analysis",
-        stage=1,
-        tools=("get_job_history",),
-        template_vars={"company_key": "bvs.md"},
-    ),
-    PromptSpec(
-        name="staffbase.md",
-        template="templates/job_blurb.md",
-        tier="strong",
-        output_type=str,
-        parent="job_analysis",
-        stage=1,
-        tools=("get_job_history",),
-        template_vars={"company_key": "staffbase.md"},
-    ),
-    PromptSpec(
-        name="10SPD.md",
-        template="templates/job_blurb.md",
-        tier="strong",
-        output_type=str,
-        parent="job_analysis",
-        stage=1,
-        tools=("get_job_history",),
-        template_vars={"company_key": "10SPD.md"},
-    ),
-    PromptSpec(
-        name="header",
-        template="templates/resume_header.md",
-        tier="strong",
-        output_type=str,
-        parent="job_analysis",
-        stage=2,
-        tools=("get_work_summaries",),
-    ),
-]
-
-SPECS_BY_NAME: dict[str, PromptSpec] = {spec.name: spec for spec in PROMPT_SPECS}
+    notes: str = ""
+    company_research: str | None = None
+    company_research_fetched: bool = False
 
 
 def get_job_description(ctx: RunContext[PipelineDeps]) -> str:
@@ -199,45 +217,201 @@ def get_job_description(ctx: RunContext[PipelineDeps]) -> str:
     return ctx.deps.job_description
 
 
-def get_skill_list(ctx: RunContext[PipelineDeps], skill_type: str) -> str:
-    """Return my skills for the given skill type.
+def get_notes(ctx: RunContext[PipelineDeps]) -> str:
+    """Return my notes/interview questions for this application."""
+    return ctx.deps.notes
 
-    Valid skill types: frontend, backend, database, infrastructure.
+
+def get_history(ctx: RunContext[PipelineDeps], company: Company) -> str:
+    """Return my work history for the given company."""
+    return read_supporting_document(HISTORY_PATHS[company])
+
+
+def get_skills(ctx: RunContext[PipelineDeps], skill_type: SkillType) -> str:
+    """Return my skills for the given skill type."""
+    return read_supporting_document(SKILL_PATHS[skill_type])
+
+
+def get_resume(ctx: RunContext[PipelineDeps]) -> str:
+    """Return the current JSON Resume document."""
+    return read_supporting_document("supporting_documents/json-resume.json")
+
+
+def search_company(query: str):
+    """Run a TinyFish web search for the company."""
+    from tinyfish import TinyFish
+
+    client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=60)
+    return client.search.query(
+        query=query,
+        purpose="company background for resume tailoring",
+    )
+
+
+def fetch_pages(urls: list[str]):
+    """Fetch and extract the text of the given pages through TinyFish."""
+    from tinyfish import TinyFish
+
+    client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=60)
+    return client.fetch.get_contents(
+        urls=urls,
+        format="markdown",
+        purpose="company background for resume tailoring",
+    )
+
+
+def build_company_brief(company: str) -> str:
+    """Build a short, source-backed company brief through TinyFish."""
+    if not os.getenv("TINYFISH_API_KEY"):
+        return RESEARCH_UNAVAILABLE_NO_KEY
+
+    try:
+        query = (
+            f"{company} company overview products engineering blog recent news"
+        )
+        search = search_company(query)
+        urls = [result.url for result in search.results[:5] if result.url]
+        pages = fetch_pages(urls[:4]) if urls else None
+
+        parts = [f"# {company} research"]
+        if pages is not None:
+            for result in pages.results:
+                text = (result.text or "")[:3000]
+                parts.append(
+                    f"## {result.title or result.url}\n"
+                    f"Source: {result.url}\n{text}"
+                )
+            for error in pages.errors:
+                parts.append(f"- could not fetch {error.url}: {error.error}")
+        else:
+            for result in search.results[:5]:
+                parts.append(f"- {result.title} ({result.url}): {result.snippet}")
+
+        brief = "\n\n".join(parts)[:10000]
+        return f"<company_research>\n{brief}\n</company_research>"
+    except Exception as exc:
+        logger.exception("company research failed for %s", company)
+        return f"Company research unavailable: {exc}."
+
+
+def research_company(ctx: RunContext[PipelineDeps]) -> str:
+    """Research the company this application is for.
+
+    Returns a short, source-backed brief plus source URLs. No arguments: the
+    company comes from the application.
     """
-    return ctx.deps.skills.get(skill_type, "")
+    if ctx.deps.company_research:
+        return ctx.deps.company_research
+
+    brief = build_company_brief(ctx.deps.company)
+    ctx.deps.company_research = brief
+    ctx.deps.company_research_fetched = not brief.startswith(
+        "Company research unavailable"
+    )
+    return brief
 
 
-def get_job_history(ctx: RunContext[PipelineDeps], company_key: str) -> str:
-    """Return my work history document for the given company key."""
-    return ctx.deps.histories.get(company_key, "")
+TOOLS = (
+    get_job_description,
+    get_notes,
+    get_history,
+    get_skills,
+    get_resume,
+    research_company,
+)
 
 
-def get_work_summaries(ctx: RunContext[PipelineDeps]) -> str:
-    """Return the finished work-history blurbs, keyed by company."""
-    return json.dumps(ctx.deps.work_summaries, indent=2)
+# ---------------------------------------------------------------------------
+# Merge and validation
+# ---------------------------------------------------------------------------
 
 
-TOOLS = {
-    "get_job_description": get_job_description,
-    "get_skill_list": get_skill_list,
-    "get_job_history": get_job_history,
-    "get_work_summaries": get_work_summaries,
+_LIST_KEY_FIELDS = {
+    "work": "name",
+    "volunteer": "organization",
+    "education": "institution",
+    "awards": "title",
+    "certificates": "name",
+    "publications": "name",
+    "skills": "name",
+    "languages": "language",
+    "interests": "name",
+    "references": "name",
+    "projects": "name",
+    "profiles": "network",
 }
+
+
+def _merge_list(base: list, patch: list, key_field: str) -> list:
+    if not patch:
+        return copy.deepcopy(base)
+
+    merged = copy.deepcopy(base) if isinstance(base, list) else []
+    for item in patch:
+        key = item.get(key_field) if isinstance(item, dict) else None
+        if key is not None:
+            for index, existing in enumerate(merged):
+                if isinstance(existing, dict) and existing.get(key_field) == key:
+                    merged[index] = merge_resume(existing, item)
+                    break
+            else:
+                merged.append(copy.deepcopy(item))
+        else:
+            merged.append(copy.deepcopy(item))
+    return merged
+
+
+def merge_resume(base: dict, patch: dict) -> dict:
+    """Merge a model-produced patch over the base resume without dropping data."""
+    if not isinstance(base, dict):
+        base = {}
+
+    merged = copy.deepcopy(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_resume(merged[key], value)
+        elif isinstance(value, list):
+            if value and not all(isinstance(item, dict) for item in value):
+                merged[key] = copy.deepcopy(value)
+            else:
+                merged[key] = _merge_list(
+                    merged.get(key, []),
+                    value,
+                    _LIST_KEY_FIELDS.get(key, "name"),
+                )
+        elif value is not None:
+            merged[key] = value
+    return merged
+
+
+@lru_cache(maxsize=1)
+def load_resume_schema() -> dict:
+    path = (
+        settings.BASE_DIR
+        / "application_manager"
+        / "supporting_documents"
+        / "json-resume.schema.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_resume(blob: dict) -> None:
+    """Validate a JSON Resume document against the vendored schema."""
+    jsonschema.validate(
+        blob,
+        load_resume_schema(),
+        format_checker=FormatChecker(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline
+# ---------------------------------------------------------------------------
 
 
 # One model (and therefore one HTTP client / connection pool) per provider per
 # pipeline run. Cleared at the start of every run.
 _model_cache: dict[tuple, Model] = {}
-
-
-def find_provider(name: str) -> PromptProvider:
-    """Look up a PromptProvider row by name."""
-    provider = PromptProvider.objects.filter(name=name).first()
-    if provider is None:
-        raise ProviderNotConfigured(
-            name, list(PromptProvider.objects.values_list("name", flat=True))
-        )
-    return provider
 
 
 def _model_for(provider: PromptProvider) -> Model:
@@ -254,112 +428,95 @@ def _model_for(provider: PromptProvider) -> Model:
     return model
 
 
-def build_agent(prompt: Prompt) -> Agent:
-    """Build the agent for a prompt row.
-
-    The agent uses the model of the provider bound to the row plus the output
-    type and tools of the row's spec.
-    """
-    spec = SPECS_BY_NAME[prompt.name]
-    model = _model_for(prompt.provider)
-    agent = Agent(model, deps_type=PipelineDeps, output_type=spec.output_type)
-    for tool_name in spec.tools:
-        agent.tool(TOOLS[tool_name])
+def build_agent(application: Application) -> Agent:
+    """Build the single tuning agent for an application."""
+    agent = Agent(
+        _model_for(application.provider),
+        deps_type=PipelineDeps,
+        output_type=ResumeDocument,
+    )
+    for tool in TOOLS:
+        agent.tool(tool)
     return agent
 
 
-def collect_inputs(application_id: int) -> PipelineDeps:
-    """Read the application and supporting documents into a `PipelineDeps`."""
+def collect_inputs(application_id: int, force: bool = False) -> PipelineDeps:
+    """Read the application and the cached company brief into deps."""
     application = Application.objects.get(pk=application_id)
+
+    research = application.company_research
+    if (
+        force
+        or not application.company_researched_at
+        or application.company_researched_at < timezone.now() - RESEARCH_TTL
+    ):
+        research = None
+
     return PipelineDeps(
         job_description=application.description,
         company=application.company,
-        histories={
-            doc.split("/")[-1]: read_supporting_document(doc) for doc in job_histories
-        },
-        skills={
-            skill_type: read_supporting_document(
-                f"supporting_documents/{skill_type}_skills.md"
-            )
-            for skill_type in skills_types
-        },
+        notes=application.notes or "",
+        company_research=research,
     )
 
 
-def prepare_prompts(application_id: int) -> dict[str, Prompt]:
-    """Upsert one `Prompt` row per spec (template, parent, provider)."""
+def prepare_run(application: Application) -> Prompt:
+    """Upsert the application's single prompt row."""
+    description = services.render_template(
+        "templates/tuning.md",
+        company=application.company,
+        job_description=application.description,
+        skill_names=SKILL_TYPE_TO_RESUME_NAME,
+    )
+    prompt, _created = Prompt.objects.update_or_create(
+        application=application,
+        defaults={
+            "template": "templates/tuning.md",
+            "description": description,
+            "error": None,
+        },
+    )
+    return prompt
+
+
+def run_tuning(application_id: int, force: bool = False) -> ResumeDocument:
+    """Run the single tuning call and persist its result."""
     application = Application.objects.get(pk=application_id)
-    providers: dict[str, PromptProvider] = {}
-    prompts: dict[str, Prompt] = {}
-    for spec in PROMPT_SPECS:
-        tier_name = CHEAP_MODEL if spec.tier == "cheap" else STRONG_MODEL
-        provider = providers.get(tier_name)
-        if provider is None:
-            provider = find_provider(tier_name)
-            providers[tier_name] = provider
-        prompt, _created = Prompt.objects.update_or_create(
-            application=application,
-            name=spec.name,
-            defaults={
-                "template": spec.template,
-                "provider": provider,
-                "parent": prompts.get(spec.parent),
-                "error": None,
-            },
-        )
-        prompts[spec.name] = prompt
-    return prompts
 
+    if not force and application.tuning:
+        try:
+            return ResumeDocument.model_validate(application.tuning)
+        except Exception:
+            pass
 
-def _parse_parent(parent_name: str, response: str | None):
-    if response is None:
-        return None
-    output_type = SPECS_BY_NAME[parent_name].output_type
-    if isinstance(output_type, type) and issubclass(output_type, BaseModel):
-        return output_type.model_validate_json(response)
-    return response
-
-
-def build_context(spec: PromptSpec, deps: PipelineDeps, results: dict) -> dict:
-    """Build the Jinja context for a prompt: shared inputs, vars and parent data."""
-    context: dict[str, Any] = {
-        "job_description": deps.job_description,
-        "company": deps.company,
-        **spec.template_vars,
-    }
-    if spec.parent:
-        context[spec.parent] = _parse_parent(spec.parent, results.get(spec.parent))
-    return context
-
-
-def run_pipeline(
-    deps: PipelineDeps, prompts: dict[str, Prompt], force: bool = False
-) -> dict:
-    """Run every prompt in stage order, one at a time."""
     _model_cache.clear()
-    results: dict[str, str] = {}
-    for stage in sorted({spec.stage for spec in PROMPT_SPECS}):
-        for spec in (s for s in PROMPT_SPECS if s.stage == stage):
-            prompt = prompts[spec.name]
-            context = build_context(spec, deps, results)
-            rendered = services.render_template(spec.template, **context)
-            if not force and prompt.response and prompt.description == rendered:
-                results[spec.name] = prompt.response
-                continue
-            try:
-                prompt.render(deps, **context)
-                results[spec.name] = prompt.response
-            except Exception as exc:
-                prompt.error = str(exc)
-                logger.exception("prompt %s failed", spec.name)
-        # Stage-N outputs feed the tools of later stages (e.g. header blurbs).
-        for name, value in results.items():
-            if name in deps.histories:
-                deps.work_summaries[name] = value
-    return results
+    deps = collect_inputs(application_id, force=force)
+    prompt = prepare_run(application)
 
+    try:
+        result = build_agent(application).run_sync(prompt.description, deps=deps)
+        patch = result.output.model_dump(
+            by_alias=True, mode="json", exclude_none=True
+        )
+        base = json.loads(
+            read_supporting_document("supporting_documents/json-resume.json")
+        )
+        merged = merge_resume(base, patch)
+        validate_resume(merged)
+    except Exception as exc:
+        prompt.error = str(exc)
+        prompt.save(update_fields=["error"])
+        raise
 
-def persist_results(prompts: dict[str, Prompt]) -> None:
-    """Save every prompt row (description + response + error)."""
-    for prompt in prompts.values():
-        prompt.save()
+    application.tuning = merged
+    prompt.response = json.dumps(merged, indent=2)
+    prompt.error = None
+
+    if deps.company_research_fetched:
+        application.company_research = deps.company_research
+        application.company_researched_at = timezone.now()
+
+    application.save()
+    prompt.save()
+
+    return ResumeDocument.model_validate(merged)

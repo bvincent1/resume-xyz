@@ -31,10 +31,11 @@ class ApplicationAdmin(ModelAdmin):
     model = Application
     readonly_fields = (
         "id",
-        "prompts",
         "created",
         "updated",
         "prompts_list",
+        "company_research",
+        "company_researched_at",
     )
     fieldsets = [
         (
@@ -46,6 +47,7 @@ class ApplicationAdmin(ModelAdmin):
                     "title",
                     "job_url",
                     "description",
+                    "provider",
                     "include_project_management",
                     "include_databricks",
                 ),
@@ -69,6 +71,8 @@ class ApplicationAdmin(ModelAdmin):
                 "fields": (
                     "id",
                     "resume_url",
+                    "company_research",
+                    "company_researched_at",
                     "created",
                     "updated",
                 ),
@@ -89,8 +93,12 @@ class ApplicationAdmin(ModelAdmin):
         ("status", RelatedCheckboxFilter),
     ]
 
-    actions = ["generate_pdfs", "regenerate_prompts"]
-    actions_detail = ["generate_pdf", "regenerate_app_prompts"]
+    actions = ["generate_pdfs", "regenerate_prompts", "refresh_company_research"]
+    actions_detail = [
+        "generate_pdf",
+        "regenerate_app_prompts",
+        "refresh_company_research_detail",
+    ]
 
     @action(
         description="Build PDF",
@@ -108,7 +116,6 @@ class ApplicationAdmin(ModelAdmin):
             application.build_pdf()
         self.message_user(request, "PDFs generated successfully.")
 
-
     @action(description="Regenerate prompts")
     def regenerate_app_prompts(self, request, object_id: int):
         app = Application.objects.get(pk=object_id)
@@ -121,38 +128,53 @@ class ApplicationAdmin(ModelAdmin):
             generate_prompts.delay(app.pk, force=True)
         self.message_user(request, "Prompt regeneration queued.")
 
+    @action(description="Refresh company research")
+    def refresh_company_research(self, request, queryset):
+        for app in queryset:
+            Application.objects.filter(pk=app.pk).update(
+                company_research=None, company_researched_at=None
+            )
+            generate_prompts.delay(app.pk, force=True)
+        self.message_user(request, "Company research refresh queued.")
+
+    @action(description="Refresh company research")
+    def refresh_company_research_detail(self, request: HttpRequest, object_id: int):
+        Application.objects.filter(pk=object_id).update(
+            company_research=None, company_researched_at=None
+        )
+        generate_prompts.delay(object_id, force=True)
+        self.message_user(request, "Company research refresh queued.")
+
     def prompts_list(self, obj):
-        links = [
-            f'<li><a class="text-primary-600 dark:text-primary-500 underline" href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">{prompt.name}</a></li>'
-            for prompt in obj.prompts.all()
-        ]
-        return mark_safe('<ul class="space-y-2">' + "".join(links) + "</ul>")
+        try:
+            prompt = obj.prompt
+        except Prompt.DoesNotExist:
+            return mark_safe("<p>No prompt yet.</p>")
+
+        return mark_safe(
+            '<ul class="space-y-2"><li>'
+            f'<a class="text-primary-600 dark:text-primary-500 underline" '
+            f'href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">'
+            "tuning</a></li></ul>"
+        )
 
 
 class PromptAdmin(ModelAdmin):
     model = Prompt
 
     list_filter_submit = True  # Submit button at the bottom of the filter
-    list_display = ("__str__", "template", "provider", "get_trimmed_response")
+    list_display = ("__str__", "template", "get_trimmed_response")
     list_filter = [
         ("application__company", FieldTextFilter),
     ]
-    # formfield_overrides = {
-    #     models.TextField: {
-    #         "widget": WysiwygWidget,
-    #     }
-    # }
 
-    readonly_fields = ("children_list",)
     fieldsets = [
         (
             None,
             {
                 "fields": (
                     "application",
-                    "name",
                     "template",
-                    "provider",
                     "notes",
                     "description",
                     "response",
@@ -160,15 +182,7 @@ class PromptAdmin(ModelAdmin):
                 ),
             },
         ),
-        (None, {"fields": ("children_list",)}),
     ]
-
-    def children_list(self, obj):
-        links = [
-            f'<li><a class="text-primary-600 dark:text-primary-500 underline" href="{reverse("admin:job_applications_prompt_change", args=(prompt.id,))}">{prompt.name}</a></li>'
-            for prompt in obj.children.all()
-        ]
-        return mark_safe('<ul class="space-y-2">' + "".join(links) + "</ul>")
 
 
 class StatusAdmin(ModelAdmin):
@@ -196,7 +210,7 @@ class JobURLAdmin(ModelAdmin):
         )
         if result.returncode == 0:
             job_infos = loads(result.stdout)
-            pprint(job_infos)
+            pprint.pprint(job_infos)
 
         self.message_user(request, "Prompts regenerated successfully.")
 
