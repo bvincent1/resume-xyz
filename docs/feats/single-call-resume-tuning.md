@@ -159,10 +159,11 @@ Tools never touch the ORM; application fields are preloaded in `PipelineDeps` by
 - Do not add `list_histories` / `list_skill_types`; the enum members document valid values.
 - Keep `read_supporting_document` as an internal helper.
 
-## Company research (`job_applications/research.py`)
+## Company research (`job_applications/services.py`)
 
-Register `research_company(ctx: RunContext[PipelineDeps]) -> str`; it takes no arguments and uses
-`ctx.deps.company`.
+Add `search_company(query)`, `fetch_pages(urls)`, and `build_company_brief(company)` to `services.py`.
+`research_company(ctx: RunContext[PipelineDeps]) -> str` stays a thin tool wrapper in
+`ai.py` / `tools.py`; it takes no arguments and uses `ctx.deps.company`.
 
 - Search: `GET https://api.search.tinyfish.ai` with `X-API-Key: $TINYFISH_API_KEY` and a query built from
   the company name (`"<company> company overview products engineering blog recent news"`).
