@@ -159,11 +159,11 @@ Tools never touch the ORM; application fields are preloaded in `PipelineDeps` by
 - Do not add `list_histories` / `list_skill_types`; the enum members document valid values.
 - Keep `read_supporting_document` as an internal helper.
 
-## Company research (`job_applications/services.py`)
+## Company research (`job_applications/ai.py`)
 
-Add `search_company(query)`, `fetch_pages(urls)`, and `build_company_brief(company)` to `services.py`.
-`research_company(ctx: RunContext[PipelineDeps]) -> str` stays a thin tool wrapper in
-`ai.py` / `tools.py`; it takes no arguments and uses `ctx.deps.company`.
+Add `search_company(query)`, `fetch_pages(urls)`, `build_company_brief(company)`, and the
+`research_company(ctx: RunContext[PipelineDeps]) -> str` tool to `ai.py`. The tool takes no arguments and
+uses `ctx.deps.company`.
 
 - Search: `GET https://api.search.tinyfish.ai` with `X-API-Key: $TINYFISH_API_KEY` and a query built from
   the company name (`"<company> company overview products engineering blog recent news"`).
@@ -228,7 +228,9 @@ Add `search_company(query)`, `fetch_pages(urls)`, and `build_company_brief(compa
 ## Configuration
 
 - Add `TINYFISH_API_KEY` to `.env.example` and deployment config.
-- Add `tinyfish>=0.2.3` and `jsonschema` to `pyproject.toml`.
+- Install the TinyFish Python SDK with `poetry add tinyfish` (adds `tinyfish>=0.2.3` to `pyproject.toml`).
+  Use `from tinyfish import TinyFish` for `client.search.query(...)` and `client.fetch.get_contents(...)`.
+- Add `jsonschema` with `poetry add jsonschema`.
 - Vendor `json-resume-api/schema.json` at
   `application_manager/application_manager/supporting_documents/json-resume.schema.json`.
 - Update the `PromptProvider` help text to remove tier-routing wording.
