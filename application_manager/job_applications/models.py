@@ -1,9 +1,11 @@
-from django.db import models, transaction
-from pydantic import BaseModel
-
-import json
 import base64
+import copy
+import json
+import logging
+from enum import Enum
 from urllib.parse import urlencode
+
+from django.db import models, transaction
 
 from .services import (
     generate_pdf,
@@ -12,28 +14,48 @@ from .services import (
     render_template,
 )
 
-job_histories = [
-    "supporting_documents/histories/bvs.md",
-    # "supporting_documents/histories/tms.md",
-    "supporting_documents/histories/staffbase.md",
-    "supporting_documents/histories/10SPD.md",
-]
 
-skills_types = [
-    "frontend",
-    "backend",
-    "database",
-    "infrastructure",
-]
+logger = logging.getLogger(__name__)
 
-# Each prompt key in `skills_types` resolves to a `name` field in the
-# `skills` section of json-resume.json. The values below mirror those names;
-# only "database" differs (the resume entry is titled "Databases").
-SKILL_PROMPT_TO_NAME = {
-    "frontend": "Frontend",
-    "backend": "Backend",
-    "database": "Databases",
-    "infrastructure": "Infrastructure",
+RESUME_SCHEMA_URL = (
+    "https://github.com/bvincent1/resume-xyz/raw/refs/heads/json-resume/"
+    "json-resume-api/schema.json"
+)
+
+
+class Company(str, Enum):
+    FORTRA = "Fortra"
+    BVS = "BVS"
+    STAFFBASE = "Staffbase"
+    TENSPD = "10SPD"
+
+
+class SkillType(str, Enum):
+    FRONTEND = "frontend"
+    BACKEND = "backend"
+    DATABASE = "database"
+    INFRASTRUCTURE = "infrastructure"
+
+
+HISTORY_PATHS = {
+    Company.BVS: "supporting_documents/histories/bvs.md",
+    Company.STAFFBASE: "supporting_documents/histories/staffbase.md",
+    Company.TENSPD: "supporting_documents/histories/10SPD.md",
+    Company.FORTRA: "supporting_documents/histories/fortra.md",
+}
+
+SKILL_PATHS = {
+    SkillType.FRONTEND: "supporting_documents/frontend_skills.md",
+    SkillType.BACKEND: "supporting_documents/backend_skills.md",
+    SkillType.DATABASE: "supporting_documents/database_skills.md",
+    SkillType.INFRASTRUCTURE: "supporting_documents/infrastructure_skills.md",
+}
+
+SKILL_TYPE_TO_RESUME_NAME = {
+    SkillType.FRONTEND: "Frontend",
+    SkillType.BACKEND: "Backend",
+    SkillType.DATABASE: "Databases",
+    SkillType.INFRASTRUCTURE: "Infrastructure",
 }
 
 
@@ -60,7 +82,7 @@ class Application(models.Model):
         null=False,
         blank=False,
         on_delete=models.PROTECT,
-        default=ApplicationStatus.get_default_pk(),
+        default=ApplicationStatus.get_default_pk,
     )
     company = models.CharField(null=False, blank=False, default="")
     job_url = models.URLField(blank=True, null=True)
@@ -81,6 +103,26 @@ class Application(models.Model):
         default=True, null=False, blank=False
     )
     include_databricks = models.BooleanField(default=True, null=False, blank=False)
+
+    provider = models.ForeignKey(
+        "PromptProvider",
+        null=False,
+        blank=False,
+        on_delete=models.PROTECT,
+        related_name="applications",
+        help_text="Model provider used for the single tuning call.",
+    )
+    tuning = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Full JSON Resume document validated against json-resume-api/schema.json.",
+    )
+    company_research = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Cached TinyFish company brief used for tuning.",
+    )
+    company_researched_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-id"]
@@ -108,7 +150,7 @@ class Application(models.Model):
         )
 
     def save(self, **kwargs):
-        dispatch = False # self._prompt_inputs_changed()
+        dispatch = False  # self._prompt_inputs_changed()
         super().save(**kwargs)
         if dispatch:
             from .tasks import dispatch_generate_prompts
@@ -116,30 +158,38 @@ class Application(models.Model):
             transaction.on_commit(lambda: dispatch_generate_prompts(self.pk))
 
     def list_prompts(self):
-        return [
-            f"{p.name} >\n{p.description}\n{p.response}\n" for p in self.prompts.all()
-        ]
-
-    def get_prompt(self, name, error=True):
         try:
-            return self.prompts.get(name__exact=name)
-        except:
-            if error:
-                raise Exception(f"prompt error trying to get: {name}")
-            else:
-                return None
+            prompt = self.prompt
+        except Prompt.DoesNotExist:
+            return []
+        return [f"{prompt.description}\n{prompt.response}\n"]
 
     def build_pdf(self):
         api_url = (
             "https://egxtrrqutcvobbehvlep.supabase.co/functions/v1/log-get-request-time"
         )
-        resume = json.loads(
+        base = json.loads(
             read_supporting_document("supporting_documents/json-resume.json")
         )
+        resume = copy.deepcopy(base)
+
+        if self.tuning:
+            try:
+                from .ai import validate_resume
+
+                validate_resume(self.tuning)
+                resume = copy.deepcopy(self.tuning)
+            except Exception:
+                logger.warning(
+                    "invalid tuning blob for application %s; using base resume",
+                    self.pk,
+                    exc_info=True,
+                )
+
+        resume["$schema"] = RESUME_SCHEMA_URL
 
         # Resolve an item in a list section by case-insensitive field match, so
-        # section targeting does not depend on the order of entries in
-        # json-resume.json.
+        # section targeting does not depend on the order of entries.
         def _find(section, **fields):
             wanted = {k: str(v).lower() for k, v in fields.items()}
             for item in resume.get(section, []) or []:
@@ -154,39 +204,16 @@ class Application(models.Model):
             url=f"{api_url}?{urlencode({'company': self.company, 'method': 'url' })}",
             base_64_url=f"{base64.b64encode(f"{api_url}?{urlencode({'company': self.company, 'method': 'base64'})}".encode("ascii")).decode("ascii")}",
         )
-        if self.get_prompt("csl", False):
+
+        if resume.get("payload"):
             resume["payload"] = render_template(
                 "templates/payload.html",
-                csl=self.get_prompt("csl").response,
+                csl=resume["payload"],
                 breakout=breakout,
             )
-        if self.get_prompt("header", False) is not None:
-            resume["basics"]["summary"] = self.get_prompt("header").response
 
-        # job name section: prompt returns one comma-separated position per
-        # entry in `job_histories`; match each position to a work entry by
-        # `name` (basename of the history file).
-        job_name_prompt = self.get_prompt("job_name", error=False)
-        if job_name_prompt is not None:
-            positions = [p.strip() for p in job_name_prompt.response.split(",")]
-            for history, position in zip(job_histories, positions):
-                if not position:
-                    continue
-                entry = _find(
-                    "work", name=history.split("/")[-1].split(".")[0]
-                )
-                if entry is not None:
-                    entry["position"] = position
-
-        # link section: rewrite profile/certificate URLs to the
-        # deuterium.dev redirect, targeting sections by network/issuer rather
-        # than positional index.
-        # redirect_map = {
-        #     '8d5fa094-0fa1-483a-902f-daf7f6b6ae7d': 'https://www.linkedin.com/in/vincent-slashsolve/',
-        #     '8487a51c-7951-4e81-b5be-88ea49c7a4c8': 'https://github.com/bvincent1',
-        #     '02b8c42f-f373-4f0d-8032-54d56f9121a9': 'https://gitlab.com/bvincent1',
-        #     'e2fb9fdc-d30b-4f5e-bc9a-49998b722a3e': 'https://www.coursera.org/account/accomplishments/records/B3UH5Y6FNWKA'
-        #   }
+        basics = resume.get("basics") or {}
+        resume["basics"] = basics
 
         github_url = "https://github.deuterium.dev"
         gitlab_url = "https://gitlab.deuterium.dev"
@@ -197,7 +224,7 @@ class Application(models.Model):
             {"company": self.company, "method": "resume", "app": self.pk}
         )
 
-        for profile in resume.get("basics", {}).get("profiles", []):
+        for profile in basics.get("profiles", []) or []:
             network = (profile.get("network") or "").lower()
             if network == "linkedin":
                 profile["url"] = f"{linkedin_url}?{query_params}"
@@ -210,31 +237,7 @@ class Application(models.Model):
         if coursera is not None:
             coursera["url"] = f"{coursera_url}?{query_params}"
 
-        resume["basics"]["email"] = f"benjc.vincent+{self.pk}@gmail.com"
-
-        # work history summaries: match by `name` (basename of the history file).
-        for history in job_histories:
-            prompt_name = history.split("/")[-1]
-            summary_prompt = self.get_prompt(prompt_name, False)
-            if summary_prompt is None:
-                continue
-            entry = _find("work", name=prompt_name.split(".")[0])
-            if entry is not None:
-                entry["summary"] = summary_prompt.response
-
-        # skills: match by the `name` declared in json-resume.json; the
-        # `database` prompt resolves to the "Databases" skill (see
-        # SKILL_PROMPT_TO_NAME).
-        for prompt_name in skills_types:
-            keywords_prompt = self.get_prompt(prompt_name, False)
-            if keywords_prompt is None:
-                continue
-            skill = _find("skills", name=SKILL_PROMPT_TO_NAME[prompt_name])
-            if skill is not None:
-                skill["keywords"] = [
-                    k.strip()
-                    for k in (keywords_prompt.response or "").split(",")
-                ]
+        basics["email"] = f"benjc.vincent+{self.pk}@gmail.com"
 
         if not self.include_project_management:
             cert = _find("certificates", name="Project Management")
@@ -260,9 +263,8 @@ class PromptProvider(models.Model):
         null=False,
         unique=True,
         help_text=(
-            "Model id sent to the API, e.g. 'openai/gpt-4.1-mini'. The pipeline "
-            "routes prompts to providers by this name (see CHEAP_MODEL / "
-            "STRONG_MODEL in ai.py)."
+            "Model id sent to the API, e.g. 'openai/gpt-4.1'. Selected per "
+            "application through Application.provider."
         ),
     )
     url = models.URLField(
@@ -288,27 +290,14 @@ class PromptProvider(models.Model):
 
 class Prompt(models.Model):
     description = models.TextField(blank=False, null=False)
-    application = models.ForeignKey(
+    application = models.OneToOneField(
         Application,
         null=False,
         on_delete=models.CASCADE,
-        related_name="prompts",
+        related_name="prompt",
     )
-    name = models.CharField(blank=False, null=False)
     template = models.CharField(blank=True, default="")
     response = models.TextField(blank=True, null=True)
-    parent = models.ForeignKey(
-        "self",
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name="children",
-    )
-    provider = models.ForeignKey(
-        PromptProvider,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name="prompts",
-    )
     notes = models.TextField(null=True, blank=True)
     error = models.TextField(null=True, blank=True)
 
@@ -316,44 +305,13 @@ class Prompt(models.Model):
         ordering = ["-id"]
 
     def __str__(self):
-        return f"{self.application.company} -> {self.name}"
-
-    def render(self, deps, **context) -> str:
-        """Template the description, ask the provider, and store the response.
-
-        The instance is mutated in memory only — the caller saves it once the
-        whole pipeline is done.
-        """
-        from .ai import build_agent  # local import: ai.py imports models.py
-
-        self.description = render_template(self.template, **context)
-        result = build_agent(self).run_sync(self.description, deps=deps)
-        self.response = self.format_response(result.output)
-        return self.response
-
-    @staticmethod
-    def format_response(output) -> str:
-        """Render a model output into the text stored in ``response``."""
-        if isinstance(output, BaseModel):
-            return output.model_dump_json()
-        if isinstance(output, list):
-            return ", ".join(str(item) for item in output)
-        return str(output)
+        return f"{self.application.company} -> tuning"
 
     def get_trimmed_response(self):
         # used in the admin dashboard table
         if self.response is not None:
             return self.response[:10]
         return ""
-
-    def save(self, **kwargs):
-        super().save(**kwargs)
-        # application_prompts = self.application.prompts.all()
-        # if len(application_prompts) == len(
-        #     [a for a in application_prompts if a.response != None]
-        # ):
-        #     self.application.status = ApplicationStatus.objects.get(name="ready")
-        #     self.application.save()
 
 
 class URLStatus(models.Model):
