@@ -5,6 +5,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from jsonschema import ValidationError
@@ -102,6 +103,47 @@ class ResearchCompanyTests(SimpleTestCase):
         build.assert_not_called()
 
 
+class ProviderAuthTests(SimpleTestCase):
+    def provider(self, env_key="TEST_PROVIDER_KEY"):
+        return PromptProvider(
+            name="test-model",
+            url="https://example.com/v1",
+            headers={},
+            env_key=env_key,
+        )
+
+    def test_env_key_resolves_api_key(self):
+        with patch.dict(os.environ, {"TEST_PROVIDER_KEY": "secret"}):
+            self.assertEqual(ai._api_key_for(self.provider()), "secret")
+
+    def test_missing_env_key_raises(self):
+        with self.assertRaises(ImproperlyConfigured):
+            ai._api_key_for(self.provider(env_key=""))
+
+    def test_unset_env_var_raises(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ImproperlyConfigured):
+                ai._api_key_for(self.provider())
+
+    def test_build_agent_creates_its_own_openai_client(self):
+        application = SimpleNamespace(provider=self.provider())
+
+        with patch.dict(os.environ, {"TEST_PROVIDER_KEY": "secret"}):
+            with patch.object(ai, "AsyncOpenAI") as openai_client:
+                with patch.object(ai, "OpenAIChatModel"):
+                    with patch.object(ai, "OpenAIProvider"):
+                        with patch.object(ai, "Agent") as agent:
+                            ai.build_agent(application)
+
+        openai_client.assert_called_once_with(
+            base_url="https://example.com/v1",
+            api_key="secret",
+            default_headers={},
+            timeout=60,
+        )
+        agent.return_value.tool.assert_called()
+
+
 class BuildPdfTests(SimpleTestCase):
     def _application(self, tuning):
         return Application(pk=1, company="Acme", tuning=tuning, status_id=1)
@@ -158,6 +200,7 @@ class RunTuningTests(TestCase):
             name="test-provider",
             url="https://example.com/v1",
             headers={},
+            env_key="TEST_PROVIDER_KEY",
         )
         self.application = Application.objects.create(
             title="Engineer",
@@ -225,6 +268,7 @@ class EnsureCompanyResearchTests(TestCase):
             name="test-provider",
             url="https://example.com/v1",
             headers={},
+            env_key="TEST_PROVIDER_KEY",
         )
         self.application = Application.objects.create(
             title="Engineer",

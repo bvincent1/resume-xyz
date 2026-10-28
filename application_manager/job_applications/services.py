@@ -9,35 +9,6 @@ file_env = Environment(
     loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager"))
 )
 
-import httpx2
-from django.conf import settings
-from jinja2 import Environment, FileSystemLoader
-from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
-
-
-env = Environment(loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager")))
-
-
-def build_model(name, url, headers) -> Model:
-    """Build a pydantic-ai Model from a provider's details.
-
-    ``name`` is the model id sent to the API, ``url`` the OpenAI-compatible base
-    url, ``headers`` the HTTP headers (including ``Authorization: Bearer <key>``).
-
-    The client is async because pydantic-ai's provider layer is async even when
-    the agent is driven with ``run_sync``. Build it once per provider and reuse
-    it.
-    """
-    headers = dict(headers or {})
-    api_key = headers.pop("Authorization", "").removeprefix("Bearer ").strip()
-    client = httpx2.AsyncClient(base_url=url, headers=headers, timeout=60)
-    return OpenAIChatModel(
-        name,
-        provider=OpenAIProvider(base_url=url, api_key=api_key, http_client=client),
-    )
-
 
 def generate_pdf(resume, host=None):
     """Render a JSON Resume object to a PDF via the json-resume-api service.

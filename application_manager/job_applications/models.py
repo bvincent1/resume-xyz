@@ -272,12 +272,21 @@ class PromptProvider(models.Model):
         null=False,
         help_text="OpenAI-compatible base URL, e.g. 'https://openrouter.ai/api/v1'.",
     )
+    env_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Environment variable holding the provider API key, e.g. "
+            "'OPENROUTER_API_KEY'."
+        ),
+    )
     headers = models.JSONField(
         default=dict,
         blank=True,
         help_text=(
-            "HTTP headers sent with every request, including "
-            "'Authorization: Bearer <key>'."
+            "Additional HTTP headers sent with every request. Auth comes from "
+            "`env_key`, not from this mapping."
         ),
     )
 

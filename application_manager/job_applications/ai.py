@@ -17,11 +17,14 @@ from functools import lru_cache
 
 import jsonschema
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 from jsonschema import FormatChecker
+from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import services
 from .models import (
@@ -400,29 +403,40 @@ def validate_resume(blob: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-# One model (and therefore one HTTP client / connection pool) per provider per
-# pipeline run. Cleared at the start of every run.
-_model_cache: dict[tuple, Model] = {}
+def _api_key_for(provider: PromptProvider) -> str:
+    """Resolve the provider API key from the environment variable in env_key."""
+    if not provider.env_key:
+        raise ImproperlyConfigured(
+            f"PromptProvider {provider.name!r} has no env_key configured."
+        )
 
-
-def _model_for(provider: PromptProvider) -> Model:
-    key = (
-        provider.pk,
-        provider.name,
-        provider.url,
-        json.dumps(provider.headers or {}, sort_keys=True),
-    )
-    model = _model_cache.get(key)
-    if model is None:
-        model = services.build_model(provider.name, provider.url, provider.render_headers())
-        _model_cache[key] = model
-    return model
+    api_key = os.getenv(provider.env_key)
+    if not api_key:
+        raise ImproperlyConfigured(
+            f"Environment variable {provider.env_key!r} is not set."
+        )
+    return api_key
 
 
 def build_agent(application: Application) -> Agent:
     """Build the single tuning agent for an application."""
+    provider = application.provider
+    headers = provider.render_headers()
+    headers.pop("Authorization", None)
+
+    client = AsyncOpenAI(
+        base_url=provider.url,
+        api_key=_api_key_for(provider),
+        default_headers=headers,
+        timeout=60,
+    )
+    model = OpenAIChatModel(
+        provider.name,
+        provider=OpenAIProvider(openai_client=client),
+    )
+
     agent = Agent(
-        _model_for(application.provider),
+        model,
         deps_type=PipelineDeps,
         output_type=ResumeDocument,
     )
@@ -493,7 +507,6 @@ def run_tuning(application_id: int, force: bool = False) -> ResumeDocument:
         except Exception:
             pass
 
-    _model_cache.clear()
     ensure_company_research(application, force=force)
     deps = collect_inputs(application_id)
     prompt = prepare_run(application)
