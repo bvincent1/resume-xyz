@@ -7,9 +7,9 @@ Add to `Application`:
 ```python
 provider = models.ForeignKey(
     "PromptProvider",
-    null=True,
-    blank=True,
-    on_delete=models.SET_NULL,
+    null=False,
+    blank=False,
+    on_delete=models.PROTECT,
     related_name="applications",
     help_text="Model provider used for the single tuning call.",
 )
@@ -97,7 +97,7 @@ copied from `supporting_documents/json-resume.json` unchanged.
 {
   "$schema": "…",
   "basics": { "name": "…", "summary": "<tuned header>" },
-  "work": [{ "name": "BVS", "position": "<tuned title>", "summary": "<tuned blurb>" }],
+  "work": [{ "name": "BVS", "summary": "<tuned blurb>" }],
   "skills": [{ "name": "Frontend", "keywords": ["<tuned keyword>"] }],
   "payload": "<comma-separated keywords>"
 }
@@ -137,7 +137,7 @@ copied from `supporting_documents/json-resume.json` unchanged.
 - On success, `run_tuning` writes the merged document to `application.tuning`, the raw JSON to
   `prompt.response`, clears `prompt.error`, and persists the company brief. On failure, set
   `prompt.error` and leave `application.tuning` unchanged.
-- Use a single model tier for the run: keep `STRONG_MODEL`, remove `CHEAP_MODEL`.
+- The provider comes from `application.provider`; remove the `STRONG_MODEL` / `CHEAP_MODEL` tier routing.
 
 ## Local resource tools (`job_applications/ai.py` or `job_applications/tools.py`)
 
@@ -164,9 +164,8 @@ uses `ctx.deps.company`.
 
 - Search: `client.search.query` with `$TINYFISH_API_KEY` and a query built from
   the company name (`"<company> company overview products engineering blog recent news"`).
-- Fetch: `client.agent.run` with
-  `{"urls": [...], "format": "markdown", "purpose": "company background for resume tailoring"}` for the
-  top 3–5 result URLs.
+- Fetch: `client.fetch.get_contents(urls=[...], format="markdown", purpose=...)` for the top 3–5
+  result URLs.
 - Return a markdown brief covering products, engineering, recent news, and culture signals, plus source
   URLs. Cap each page at ~2–3k characters and the total brief at ~8–10k characters.
 - Cache: `collect_inputs` loads `application.company_research` into deps when
@@ -193,15 +192,16 @@ uses `ctx.deps.company`.
 - Remove the per-name `get_prompt(...)` lookups and the `SKILL_PROMPT_TO_NAME` / `job_histories` section
   mapping from `build_pdf`.
 - Pass the document to `generate_pdf()`.
-- If `self.tuning` is null or invalid, log a warning and render the untouched `json-resume.json`.
+- If `self.tuning` is null or invalid, log a warning and render the base `json-resume.json` with the
+  usual tracking/email/certificate mutations.
 
 ## Templates
 
 - Add `application_manager/application_manager/templates/tuning.md` containing the instructions currently
   spread across `csl.md`, `job_name.md`, `skills_list.md`, `job_blurb.md`, and `resume_header.md`.
 - Instruct the model to call `get_resume` first, return a full `ResumeDocument`, preserve every section
-  and entry it is not tuning, tune only `basics.summary`, the three `work` entries, the four `skills`
-  entries, and `payload`, and use only facts supported by the tools.
+  and entry it is not tuning, tune only `basics.summary`, the four `work` summaries (Fortra, BVS,
+  Staffbase, 10SPD), the four `skills` entries, and `payload`, and use only facts supported by the tools.
 - Delete `csl.md`, `job_name.md`, `skills_list.md`, `job_blurb.md`, `job_analysis.md`, and
   `resume_header.md`.
 - Keep `payload.html` and `breakout.md`.
@@ -236,11 +236,12 @@ uses `ctx.deps.company`.
 
 Run the `migrations` target in `application_manager/Makefile` after each change.
 
-- Add `Application.provider`, `Application.tuning`, `Application.company_research`, and
+- Add `Application.provider` (nullable first, backfilled with the `gpt-4.1` provider or a placeholder,
+  then altered to non-null `PROTECT`), `Application.tuning`, `Application.company_research`, and
   `Application.company_researched_at`.
-- Remove `Prompt.provider`, `Prompt.parent`, `Prompt.application`, and `Prompt.name`.
+- Remove `Prompt.provider`, `Prompt.parent`, and `Prompt.name`.
 - Delete existing per-section `Prompt` rows in a data migration.
-- Re-add `Prompt.application` with `OneToOneField` and `related_name="prompt"`.
+- Alter `Prompt.application` to a `OneToOneField` after the rows are deleted.
 
 ## Tests
 
