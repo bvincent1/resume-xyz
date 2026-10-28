@@ -43,6 +43,21 @@ def dispatch_generate_prompts(application_id: int) -> None:
             exc_info=True,
         )
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def generate_company_brief(self, application_id: int):
+    """Run the research task for a single application."""
+    from . import ai
+    from .models import Application
+
+    try:
+        brief = ai.build_company_brief()
+        app = Application.objects.get(pk=application_id)
+        app.company_research = brief
+        app.company_researched_at = timezone.now()
+        app.save()
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_prompts(self, application_id: int, force: bool = False):

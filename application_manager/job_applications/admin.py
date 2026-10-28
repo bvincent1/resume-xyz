@@ -23,7 +23,7 @@ from .models import (
     URLStatus,
     PromptProvider,
 )
-from .tasks import generate_prompts
+from .tasks import generate_prompts, generate_company_brief
 
 
 class ApplicationAdmin(ModelAdmin):
@@ -131,18 +131,12 @@ class ApplicationAdmin(ModelAdmin):
     @action(description="Refresh company research")
     def refresh_company_research(self, request, queryset):
         for app in queryset:
-            Application.objects.filter(pk=app.pk).update(
-                company_research=None, company_researched_at=None
-            )
-            generate_prompts.delay(app.pk, force=True)
+            generate_company_brief.delay(app.pk)
         self.message_user(request, "Company research refresh queued.")
 
     @action(description="Refresh company research")
     def refresh_company_research_detail(self, request: HttpRequest, object_id: int):
-        Application.objects.filter(pk=object_id).update(
-            company_research=None, company_researched_at=None
-        )
-        generate_prompts.delay(object_id, force=True)
+        generate_company_brief.delay(object_id)
         self.message_user(request, "Company research refresh queued.")
 
     def prompts_list(self, obj):
