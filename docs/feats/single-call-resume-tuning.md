@@ -42,6 +42,7 @@ Add enums and resource mappings:
 from enum import Enum
 
 class Company(str, Enum):
+    FORTRA = "Fortra"
     BVS = "BVS"
     STAFFBASE = "Staffbase"
     TENSPD = "10SPD"
@@ -56,6 +57,7 @@ HISTORY_PATHS = {
     Company.BVS: "supporting_documents/histories/bvs.md",
     Company.STAFFBASE: "supporting_documents/histories/staffbase.md",
     Company.TENSPD: "supporting_documents/histories/10SPD.md",
+    Company.FORTRA: "supporting_documents/histories/fortra.md",
 }
 
 SKILL_PATHS = {
@@ -81,13 +83,12 @@ against `json-resume-api/schema.json`; a vendored copy lives at
 
 The model writes tuned values into the schema's existing fields:
 
-| Tuned content | JSON Resume field |
-| --- | --- |
-| Header summary | `basics.summary` |
-| Job title per company | `work[].position` (matched by `name`) |
-| Company blurb per company | `work[].summary` (matched by `name`) |
-| Skill keywords per type | `skills[].keywords` (matched by `name`) |
-| Keyword payload for the hidden section | `payload` (comma-separated string) |
+| Tuned content                          | JSON Resume field                       |
+| -------------------------------------- | --------------------------------------- |
+| Header summary                         | `basics.summary`                        |
+| Company blurb per company              | `work[].summary` (matched by `name`)    |
+| Skill keywords per type                | `skills[].keywords` (matched by `name`) |
+| Keyword payload for the hidden section | `payload` (comma-separated string)      |
 
 All other sections (`education`, `awards`, `certificates`, `languages`, `projects`, `meta`, etc.) are
 copied from `supporting_documents/json-resume.json` unchanged.
@@ -96,12 +97,8 @@ copied from `supporting_documents/json-resume.json` unchanged.
 {
   "$schema": "…",
   "basics": { "name": "…", "summary": "<tuned header>" },
-  "work": [
-    { "name": "BVS", "position": "<tuned title>", "summary": "<tuned blurb>" }
-  ],
-  "skills": [
-    { "name": "Frontend", "keywords": ["<tuned keyword>"] }
-  ],
+  "work": [{ "name": "BVS", "position": "<tuned title>", "summary": "<tuned blurb>" }],
+  "skills": [{ "name": "Frontend", "keywords": ["<tuned keyword>"] }],
   "payload": "<comma-separated keywords>"
 }
 ```
@@ -146,14 +143,14 @@ copied from `supporting_documents/json-resume.json` unchanged.
 
 Tools never touch the ORM; application fields are preloaded in `PipelineDeps` by `collect_inputs`.
 
-| Tool | Signature | Returns |
-| --- | --- | --- |
-| `get_job_description` | `()` | `Application.description` from deps |
-| `get_notes` | `()` | `Application.notes` from deps |
-| `get_history` | `(company: Company)` | `read_supporting_document(HISTORY_PATHS[company])` |
-| `get_skills` | `(skill_type: SkillType)` | `read_supporting_document(SKILL_PATHS[skill_type])` |
-| `get_resume` | `()` | contents of `supporting_documents/json-resume.json` |
-| `research_company` | `()` | cached or freshly fetched company brief |
+| Tool                  | Signature                 | Returns                                             |
+| --------------------- | ------------------------- | --------------------------------------------------- |
+| `get_job_description` | `()`                      | `Application.description` from deps                 |
+| `get_notes`           | `()`                      | `Application.notes` from deps                       |
+| `get_history`         | `(company: Company)`      | `read_supporting_document(HISTORY_PATHS[company])`  |
+| `get_skills`          | `(skill_type: SkillType)` | `read_supporting_document(SKILL_PATHS[skill_type])` |
+| `get_resume`          | `()`                      | contents of `supporting_documents/json-resume.json` |
+| `research_company`    | `()`                      | cached or freshly fetched company brief             |
 
 - Do not expose a general file reader or a path argument.
 - Do not add `list_histories` / `list_skill_types`; the enum members document valid values.
@@ -165,9 +162,9 @@ Add `search_company(query)`, `fetch_pages(urls)`, `build_company_brief(company)`
 `research_company(ctx: RunContext[PipelineDeps]) -> str` tool to `ai.py`. The tool takes no arguments and
 uses `ctx.deps.company`.
 
-- Search: `GET https://api.search.tinyfish.ai` with `X-API-Key: $TINYFISH_API_KEY` and a query built from
+- Search: `client.search.query` with `$TINYFISH_API_KEY` and a query built from
   the company name (`"<company> company overview products engineering blog recent news"`).
-- Fetch: `POST https://api.fetch.tinyfish.ai` with
+- Fetch: `client.agent.run` with
   `{"urls": [...], "format": "markdown", "purpose": "company background for resume tailoring"}` for the
   top 3–5 result URLs.
 - Return a markdown brief covering products, engineering, recent news, and culture signals, plus source
@@ -237,11 +234,13 @@ uses `ctx.deps.company`.
 
 ## Migrations
 
+Run the `migrations` target in `application_manager/Makefile` after each change.
+
 - Add `Application.provider`, `Application.tuning`, `Application.company_research`, and
   `Application.company_researched_at`.
-- Remove `Prompt.provider`, `Prompt.parent`, and `Prompt.name`.
-- Alter `Prompt.application` to `OneToOneField` with `related_name="prompt"`.
+- Remove `Prompt.provider`, `Prompt.parent`, `Prompt.application`, and `Prompt.name`.
 - Delete existing per-section `Prompt` rows in a data migration.
+- Re-add `Prompt.application` with `OneToOneField` and `related_name="prompt"`.
 
 ## Tests
 
@@ -249,7 +248,6 @@ uses `ctx.deps.company`.
   rejected.
 - `merge_resume` preserves base sections and entries the model omitted.
 - `ResumeDocument` round-trips through `model_dump(mode="json", by_alias=True)` and `model_validate`.
-- Tool enum arguments reject unknown values.
-- `research_company` handles a missing API key, a request error, and a cached brief without network calls.
+- `research_company` handles a request error, and a cached brief without network calls.
 - `build_pdf` applies the tracking URLs, certificate toggles, and payload rendering to a valid tuning
   document, and falls back to the base resume when the blob is missing or invalid.
