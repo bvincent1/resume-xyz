@@ -40,6 +40,8 @@ django-extensions = "^4.1"
 django-simple-history = "^3.10.1"
 pyppeteer = "^2.0.0"
 dj-database-url = "^3.1.2"
+tinyfish = ">=0.2.3"
+jsonschema = "^4.26.0"
 
 
 [tool.poetry.group.dev.dependencies]
