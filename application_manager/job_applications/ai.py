@@ -414,7 +414,7 @@ def _model_for(provider: PromptProvider) -> Model:
     )
     model = _model_cache.get(key)
     if model is None:
-        model = services.build_model(provider.name, provider.url, provider.headers)
+        model = services.build_model(provider.name, provider.url, provider.render_headers())
         _model_cache[key] = model
     return model
 

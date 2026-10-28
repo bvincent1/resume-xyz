@@ -9,7 +9,7 @@ from subprocess import run, PIPE
 from django.http import HttpRequest
 from django.shortcuts import redirect
 from unfold.decorators import action
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.utils.safestring import mark_safe
 from unfold.contrib.forms.widgets import WysiwygWidget
 from django.db import models
@@ -121,6 +121,7 @@ class ApplicationAdmin(ModelAdmin):
         app = Application.objects.get(pk=object_id)
         generate_prompts.delay(app.pk, force=True)
         self.message_user(request, "Prompt regeneration queued.")
+        return redirect(reverse_lazy('admin:job_applications_application_changelist'))
 
     @action(description="Regenerate prompts")
     def regenerate_prompts(self, request, queryset):
@@ -134,10 +135,12 @@ class ApplicationAdmin(ModelAdmin):
             generate_company_brief.delay(app.pk)
         self.message_user(request, "Company research refresh queued.")
 
-    @action(description="Refresh company research")
+    @action(description="Refresh company research", url_path="refresh-company-research-detail",)
     def refresh_company_research_detail(self, request: HttpRequest, object_id: int):
         generate_company_brief.delay(object_id)
         self.message_user(request, "Company research refresh queued.")
+        return redirect(reverse_lazy('admin:job_applications_application_changelist'))
+
 
     def prompts_list(self, obj):
         try:

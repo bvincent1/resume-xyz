@@ -1,9 +1,5 @@
 version: "3.8"
 
-# In this Docker Compose example, we only fire up the services required for local development.
-# This is not advised for production use as it exposes ports to the database insecurely.
-# If you're looking for a production-ready Docker Compose file, check out the `traefik.yml` file.
-
 services:
   # Database (Postgres)
   rabbitmq:
@@ -50,11 +46,9 @@ services:
       - rabbitmq
     env_file: ./application_manager/.env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
       RABBITMQ_CLIENT_HOST: rabbitmq
       RABBITMQ_CLIENT_PORT: 5672
-      STORAGE_HOST: http://minio:9000
+      RESUME_SERVICE_HOST: http://resume:3000
     command: /bin/sh -c 'make worker'
 
   celery_scheduler:
@@ -65,8 +59,6 @@ services:
       - rabbitmq
     env_file: ./application_manager/.env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
       RABBITMQ_CLIENT_HOST: rabbitmq
       RABBITMQ_CLIENT_PORT: 5672
       STORAGE_HOST: http://minio:9000
