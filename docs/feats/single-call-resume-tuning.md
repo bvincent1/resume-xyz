@@ -210,6 +210,8 @@ uses `ctx.deps.company`.
 ## Tasks (`job_applications/tasks.py`)
 
 - `generate_prompts` calls `ai.run_tuning(application_id, force=force)`.
+- Add `generate_company_brief(application_id)`, which calls
+  `ai.ensure_company_research(application, force=True)`; the admin refresh action queues it.
 - Catch one exception per run, store it on `application.prompt`, and retry as configured.
 - Persist `company_research` and `company_researched_at` after a successful run.
 
