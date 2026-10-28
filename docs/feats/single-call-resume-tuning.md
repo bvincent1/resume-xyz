@@ -150,7 +150,7 @@ Tools never touch the ORM; application fields are preloaded in `PipelineDeps` by
 | `get_history`         | `(company: Company)`      | `read_supporting_document(HISTORY_PATHS[company])`  |
 | `get_skills`          | `(skill_type: SkillType)` | `read_supporting_document(SKILL_PATHS[skill_type])` |
 | `get_resume`          | `()`                      | contents of `supporting_documents/json-resume.json` |
-| `research_company`    | `()`                      | cached or freshly fetched company brief             |
+| `research_company`    | `()`                      | company brief from `Application.company_research`   |
 
 - Do not expose a general file reader or a path argument.
 - Do not add `list_histories` / `list_skill_types`; the enum members document valid values.
@@ -168,10 +168,11 @@ uses `ctx.deps.company`.
   result URLs.
 - Return a markdown brief covering products, engineering, recent news, and culture signals, plus source
   URLs. Cap each page at ~2–3k characters and the total brief at ~8–10k characters.
-- Cache: `collect_inputs` loads `application.company_research` into deps when
-  `application.company_researched_at` is younger than 7 days and `force` is false. `research_company`
-  returns the cached value if present; otherwise it calls TinyFish, stores the brief on deps, and the task
-  persists it with `company_researched_at`.
+- `run_tuning` calls `ensure_company_research(application, force)` before building the agent. It crawls
+  when `force` is set or the cached brief is older than 7 days, then persists `company_research` and
+  `company_researched_at` on the application.
+- `collect_inputs` reads the saved `application.company_research` into deps. The `research_company` tool
+  only returns `ctx.deps.company_research`; it never calls TinyFish itself.
 - Fallbacks: missing `TINYFISH_API_KEY` returns `"Company research unavailable (no API key configured)."`;
   request errors return `"Company research unavailable: <reason>."`; partial fetch failures include the
   successful pages and note the failures. Research failures never fail the run.

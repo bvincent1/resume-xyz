@@ -209,7 +209,6 @@ class PipelineDeps:
     company: str
     notes: str = ""
     company_research: str | None = None
-    company_research_fetched: bool = False
 
 
 def get_job_description(ctx: RunContext[PipelineDeps]) -> str:
@@ -295,20 +294,12 @@ def build_company_brief(company: str) -> str:
 
 
 def research_company(ctx: RunContext[PipelineDeps]) -> str:
-    """Research the company this application is for.
+    """Return the company brief already stored on the application.
 
-    Returns a short, source-backed brief plus source URLs. No arguments: the
-    company comes from the application.
+    The crawl runs before the agent starts, so this tool only reads the value
+    loaded into deps from `Application.company_research`.
     """
-    if ctx.deps.company_research:
-        return ctx.deps.company_research
-
-    brief = build_company_brief(ctx.deps.company)
-    ctx.deps.company_research = brief
-    ctx.deps.company_research_fetched = not brief.startswith(
-        "Company research unavailable"
-    )
-    return brief
+    return ctx.deps.company_research or "Company research unavailable."
 
 
 TOOLS = (
@@ -440,24 +431,37 @@ def build_agent(application: Application) -> Agent:
     return agent
 
 
-def collect_inputs(application_id: int, force: bool = False) -> PipelineDeps:
-    """Read the application and the cached company brief into deps."""
+def collect_inputs(application_id: int) -> PipelineDeps:
+    """Read the application and its cached company brief into deps."""
     application = Application.objects.get(pk=application_id)
-
-    research = application.company_research
-    if (
-        force
-        or not application.company_researched_at
-        or application.company_researched_at < timezone.now() - RESEARCH_TTL
-    ):
-        research = None
 
     return PipelineDeps(
         job_description=application.description,
         company=application.company,
         notes=application.notes or "",
-        company_research=research,
+        company_research=application.company_research,
     )
+
+
+def ensure_company_research(application: Application, force: bool = False) -> str:
+    """Crawl the company before tuning, reusing a fresh cached brief."""
+    fresh = (
+        application.company_research
+        and application.company_researched_at
+        and application.company_researched_at >= timezone.now() - RESEARCH_TTL
+    )
+    if fresh and not force:
+        return application.company_research
+
+    brief = build_company_brief(application.company)
+    application.company_research = brief
+    application.company_researched_at = (
+        None
+        if brief.startswith("Company research unavailable")
+        else timezone.now()
+    )
+    application.save()
+    return brief
 
 
 def prepare_run(application: Application) -> Prompt:
@@ -490,7 +494,8 @@ def run_tuning(application_id: int, force: bool = False) -> ResumeDocument:
             pass
 
     _model_cache.clear()
-    deps = collect_inputs(application_id, force=force)
+    ensure_company_research(application, force=force)
+    deps = collect_inputs(application_id)
     prompt = prepare_run(application)
 
     try:
@@ -511,10 +516,6 @@ def run_tuning(application_id: int, force: bool = False) -> ResumeDocument:
     application.tuning = merged
     prompt.response = json.dumps(merged, indent=2)
     prompt.error = None
-
-    if deps.company_research_fetched:
-        application.company_research = deps.company_research
-        application.company_researched_at = timezone.now()
 
     application.save()
     prompt.save()

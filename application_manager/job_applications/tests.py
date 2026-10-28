@@ -1,10 +1,12 @@
 import copy
 import json
 import os
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from jsonschema import ValidationError
 
 from . import ai
@@ -175,13 +177,16 @@ class RunTuningTests(TestCase):
 
         with patch.object(ai, "build_agent", return_value=fake_agent):
             with patch.object(
-                ai,
-                "collect_inputs",
-                return_value=ai.PipelineDeps(
-                    job_description="Build things", company="Acme"
-                ),
+                ai, "ensure_company_research", return_value="company brief"
             ):
-                result = ai.run_tuning(self.application.pk, force=True)
+                with patch.object(
+                    ai,
+                    "collect_inputs",
+                    return_value=ai.PipelineDeps(
+                        job_description="Build things", company="Acme"
+                    ),
+                ):
+                    result = ai.run_tuning(self.application.pk, force=True)
 
         self.application.refresh_from_db()
         self.assertEqual(result.basics.summary, "Tuned summary")
@@ -197,15 +202,66 @@ class RunTuningTests(TestCase):
     def test_run_tuning_records_errors(self):
         with patch.object(ai, "build_agent", side_effect=RuntimeError("boom")):
             with patch.object(
-                ai,
-                "collect_inputs",
-                return_value=ai.PipelineDeps(
-                    job_description="Build things", company="Acme"
-                ),
+                ai, "ensure_company_research", return_value="company brief"
             ):
-                with self.assertRaises(RuntimeError):
-                    ai.run_tuning(self.application.pk, force=True)
+                with patch.object(
+                    ai,
+                    "collect_inputs",
+                    return_value=ai.PipelineDeps(
+                        job_description="Build things", company="Acme"
+                    ),
+                ):
+                    with self.assertRaises(RuntimeError):
+                        ai.run_tuning(self.application.pk, force=True)
 
         self.application.refresh_from_db()
         self.assertIsNone(self.application.tuning)
         self.assertEqual(self.application.prompt.error, "boom")
+
+
+class EnsureCompanyResearchTests(TestCase):
+    def setUp(self):
+        provider = PromptProvider.objects.create(
+            name="test-provider",
+            url="https://example.com/v1",
+            headers={},
+        )
+        self.application = Application.objects.create(
+            title="Engineer",
+            description="Build things",
+            company="Acme",
+            provider=provider,
+            company_research="cached brief",
+            company_researched_at=timezone.now(),
+        )
+
+    def test_fresh_cache_skips_crawl(self):
+        with patch.object(ai, "build_company_brief") as build:
+            brief = ai.ensure_company_research(self.application)
+
+        self.assertEqual(brief, "cached brief")
+        build.assert_not_called()
+
+    def test_stale_cache_crawls_and_persists(self):
+        self.application.company_researched_at = timezone.now() - timedelta(days=8)
+        self.application.save()
+
+        with patch.object(
+            ai, "build_company_brief", return_value="fresh brief"
+        ) as build:
+            brief = ai.ensure_company_research(self.application)
+
+        self.assertEqual(brief, "fresh brief")
+        build.assert_called_once_with("Acme")
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.company_research, "fresh brief")
+        self.assertIsNotNone(self.application.company_researched_at)
+
+    def test_force_ignores_fresh_cache(self):
+        with patch.object(
+            ai, "build_company_brief", return_value="forced brief"
+        ) as build:
+            brief = ai.ensure_company_research(self.application, force=True)
+
+        self.assertEqual(brief, "forced brief")
+        build.assert_called_once_with("Acme")
