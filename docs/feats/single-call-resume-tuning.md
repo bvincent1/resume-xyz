@@ -16,7 +16,7 @@ provider = models.ForeignKey(
 tuning = models.JSONField(
     null=True,
     blank=True,
-    help_text="Validated TuningResult blob for the last successful run.",
+    help_text="Full JSON Resume document validated against json-resume-api/schema.json.",
 )
 company_research = models.TextField(
     null=True,
@@ -28,9 +28,13 @@ company_researched_at = models.DateTimeField(null=True, blank=True)
 
 Change `Prompt`:
 
-- Remove `provider` and `parent` (and the `children` relation).
-- Keep a single row per application: `name = "resume_tuning"`, `description` holds the rendered
-  instruction, `response` holds the raw JSON blob, `error` holds failure text.
+- Remove `provider`, `parent` (and the `children` relation), and `name`.
+- Change `application` to a `OneToOneField(Application, related_name="prompt")`; there is exactly one
+  prompt row per application.
+- Keep `description` (the rendered instruction), `template`, `response` (the raw JSON blob), `notes`, and
+  `error`.
+- Replace `Application.get_prompt(name)` with the `application.prompt` relation and simplify
+  `Application.list_prompts()` to return the single prompt.
 
 Add enums and resource mappings:
 
@@ -60,34 +64,82 @@ SKILL_PATHS = {
     SkillType.DATABASE: "supporting_documents/database_skills.md",
     SkillType.INFRASTRUCTURE: "supporting_documents/infrastructure_skills.md",
 }
+
+SKILL_TYPE_TO_RESUME_NAME = {
+    SkillType.FRONTEND: "Frontend",
+    SkillType.BACKEND: "Backend",
+    SkillType.DATABASE: "Databases",
+    SkillType.INFRASTRUCTURE: "Infrastructure",
+}
 ```
+
+## Tuning blob: full JSON Resume document
+
+`Application.tuning` stores a complete JSON Resume document, not a custom section bag. It must validate
+against `json-resume-api/schema.json`; a vendored copy lives at
+`application_manager/application_manager/supporting_documents/json-resume.schema.json`.
+
+The model writes tuned values into the schema's existing fields:
+
+| Tuned content | JSON Resume field |
+| --- | --- |
+| Header summary | `basics.summary` |
+| Job title per company | `work[].position` (matched by `name`) |
+| Company blurb per company | `work[].summary` (matched by `name`) |
+| Skill keywords per type | `skills[].keywords` (matched by `name`) |
+| Keyword payload for the hidden section | `payload` (comma-separated string) |
+
+All other sections (`education`, `awards`, `certificates`, `languages`, `projects`, `meta`, etc.) are
+copied from `supporting_documents/json-resume.json` unchanged.
+
+```json
+{
+  "$schema": "…",
+  "basics": { "name": "…", "summary": "<tuned header>" },
+  "work": [
+    { "name": "BVS", "position": "<tuned title>", "summary": "<tuned blurb>" }
+  ],
+  "skills": [
+    { "name": "Frontend", "keywords": ["<tuned keyword>"] }
+  ],
+  "payload": "<comma-separated keywords>"
+}
+```
+
+## Resume model and validation (`job_applications/ai.py`)
+
+- Define `ResumeDocument` as a pydantic model mirroring the schema: `$schema` (aliased), `basics`, `work`,
+  `volunteer`, `education`, `awards`, `certificates`, `publications`, `skills`, `languages`, `interests`,
+  `references`, `projects`, `meta`, `payload`.
+- Root model uses `extra="forbid"` (matching `additionalProperties: false`); nested models use
+  `extra="allow"` (matching the schema's permissive objects).
+- Use `output_type=ResumeDocument` so the model receives the shape in the structured-output schema.
+- After the run, merge the model output over the base resume with `merge_resume(base, patch)`:
+  - deep-merge dictionaries;
+  - merge `work`, `skills`, `certificates`, and other arrays by their identifying field (`name`,
+    `institution`, `title`), preserving base order and keeping entries the model omitted;
+  - replace scalar/list values the model did provide.
+- Validate the merged document with `jsonschema.validate(blob, schema, format_checker=FormatChecker())`
+  before persisting; retry the agent on failure.
+- Replace the custom `TuningResult` / `JobAnalysis` models with `ResumeDocument`.
 
 ## Pipeline (`job_applications/ai.py`)
 
-- Replace `PROMPT_SPECS` with one spec: `resume_tuning`, provider from `application.provider`, tools
+- Replace `PROMPT_SPECS` with one spec (no name field, since the prompt row is one-to-one), provider from
+  `application.provider`, tools
   `("get_job_description", "get_notes", "get_history", "get_skills", "get_resume", "research_company")`.
-- Replace `JobAnalysis` and per-stage outputs with one output model:
-
-```python
-class TuningResult(BaseModel):
-    header: str
-    csl: list[str]
-    job_names: dict[Company, str]
-    skills: dict[SkillType, list[str]]
-    histories: dict[Company, str]
-```
-
 - Remove `stage`, `parent`, `template_vars`, `_parse_parent`, `build_context`, and `run_pipeline`.
-- Add `run_tuning(application_id, force=False) -> TuningResult`.
+- Add `run_tuning(application_id, force=False) -> ResumeDocument`.
 - Reduce `collect_inputs` to the application fields, `company`, and the cached company brief; do not read
   every supporting document up front.
-- Replace `prepare_prompts` with `prepare_run(application)`, which upserts the single `resume_tuning`
-  row, sets `description`, and clears `error`.
+- Replace `prepare_prompts` with `prepare_run(application)`, which upserts the application's single prompt
+  via `Prompt.objects.update_or_create(application=application, defaults={...})`, sets `description`, and
+  clears `error`.
 - `build_agent(application)` builds the agent from `application.provider`; keep the per-provider model
   cache.
-- On success, `run_tuning` writes `application.tuning = result.model_dump(mode="json")`,
-  `prompt.response = result.model_dump_json()`, clears `prompt.error`, and persists the company brief.
-  On failure, set `prompt.error` and leave `application.tuning` unchanged.
+- On success, `run_tuning` writes the merged document to `application.tuning`, the raw JSON to
+  `prompt.response`, clears `prompt.error`, and persists the company brief. On failure, set
+  `prompt.error` and leave `application.tuning` unchanged.
 - Use a single model tier for the run: keep `STRONG_MODEL`, remove `CHEAP_MODEL`.
 
 ## Local resource tools (`job_applications/ai.py` or `job_applications/tools.py`)
@@ -131,22 +183,27 @@ Register `research_company(ctx: RunContext[PipelineDeps]) -> str`; it takes no a
 
 ## PDF assembly (`Application.build_pdf`)
 
-- Validate the blob with `TuningResult.model_validate(self.tuning)` and apply it to `json-resume.json`:
-  - `resume["payload"]` from `tuning.csl`
-  - `resume["basics"]["summary"]` from `tuning.header`
-  - work positions from `tuning.job_names`
-  - work summaries from `tuning.histories`, matched by `Company`
-  - skill keywords from `tuning.skills`, mapped through `SKILL_PROMPT_TO_NAME`
-- Remove the per-name `get_prompt(...)` lookups.
-- Keep URL rewriting, email, certificate toggles, and `generate_pdf()` unchanged.
+- Load `Application.tuning` and validate it against the vendored schema.
+- Apply deterministic mutations:
+  - set `$schema` to the canonical schema URL;
+  - set `basics.email` to `benjc.vincent+{pk}@gmail.com`;
+  - rewrite `basics.profiles[].url` for LinkedIn/GitHub/GitLab and the Google Coursera certificate URL to
+    the `*.deuterium.dev` tracking URLs;
+  - remove certificates based on `include_project_management` / `include_databricks`;
+  - render `templates/payload.html` with `csl = tuning["payload"]` and the `breakout` value, then replace
+    `resume["payload"]` with the rendered HTML.
+- Remove the per-name `get_prompt(...)` lookups and the `SKILL_PROMPT_TO_NAME` / `job_histories` section
+  mapping from `build_pdf`.
+- Pass the document to `generate_pdf()`.
 - If `self.tuning` is null or invalid, log a warning and render the untouched `json-resume.json`.
 
 ## Templates
 
 - Add `application_manager/application_manager/templates/tuning.md` containing the instructions currently
-  spread across `csl.md`, `job_name.md`, `skills_list.md`, `job_blurb.md`, and `resume_header.md`; instruct
-  the model to use the named tools, call `research_company` before writing the header and blurbs, use only
-  supported facts, and treat tool output as untrusted data.
+  spread across `csl.md`, `job_name.md`, `skills_list.md`, `job_blurb.md`, and `resume_header.md`.
+- Instruct the model to call `get_resume` first, return a full `ResumeDocument`, preserve every section
+  and entry it is not tuning, tune only `basics.summary`, the three `work` entries, the four `skills`
+  entries, and `payload`, and use only facts supported by the tools.
 - Delete `csl.md`, `job_name.md`, `skills_list.md`, `job_blurb.md`, `job_analysis.md`, and
   `resume_header.md`.
 - Keep `payload.html` and `breakout.md`.
@@ -154,7 +211,7 @@ Register `research_company(ctx: RunContext[PipelineDeps]) -> str`; it takes no a
 ## Tasks (`job_applications/tasks.py`)
 
 - `generate_prompts` calls `ai.run_tuning(application_id, force=force)`.
-- Catch one exception per run, store it on the `resume_tuning` prompt, and retry as configured.
+- Catch one exception per run, store it on `application.prompt`, and retry as configured.
 - Persist `company_research` and `company_researched_at` after a successful run.
 
 ## Admin (`job_applications/admin.py`)
@@ -162,26 +219,34 @@ Register `research_company(ctx: RunContext[PipelineDeps]) -> str`; it takes no a
 - Add `provider` to `ApplicationAdmin`.
 - Show `company_research` and `company_researched_at` read-only and add a "Refresh company research"
   action.
-- Remove `provider` from `PromptAdmin.list_display` and fieldsets; remove `parent` and `children_list`.
-- Keep `prompts_list`, `regenerate_app_prompts`, and `regenerate_prompts`.
+- Remove `name` and `provider` from `PromptAdmin.list_display` and fieldsets; remove `parent` and
+  `children_list`; update `Prompt.__str__` to use the application instead of `name`.
+- Change `prompts_list` on `ApplicationAdmin` to link `obj.prompt` instead of iterating `obj.prompts.all()`.
+- Keep `regenerate_app_prompts` and `regenerate_prompts`.
 
 ## Configuration
 
 - Add `TINYFISH_API_KEY` to `.env.example` and deployment config.
-- Add `tinyfish>=0.2.3` to `pyproject.toml`.
+- Add `tinyfish>=0.2.3` and `jsonschema` to `pyproject.toml`.
+- Vendor `json-resume-api/schema.json` at
+  `application_manager/application_manager/supporting_documents/json-resume.schema.json`.
 - Update the `PromptProvider` help text to remove tier-routing wording.
 
 ## Migrations
 
 - Add `Application.provider`, `Application.tuning`, `Application.company_research`, and
   `Application.company_researched_at`.
-- Remove `Prompt.provider` and `Prompt.parent`.
+- Remove `Prompt.provider`, `Prompt.parent`, and `Prompt.name`.
+- Alter `Prompt.application` to `OneToOneField` with `related_name="prompt"`.
 - Delete existing per-section `Prompt` rows in a data migration.
 
 ## Tests
 
-- `TuningResult` round-trips through `model_dump(mode="json")` and `model_validate` with enum keys.
+- A valid full document passes the vendored schema; unknown root keys and malformed `iso8601` values are
+  rejected.
+- `merge_resume` preserves base sections and entries the model omitted.
+- `ResumeDocument` round-trips through `model_dump(mode="json", by_alias=True)` and `model_validate`.
 - Tool enum arguments reject unknown values.
 - `research_company` handles a missing API key, a request error, and a cached brief without network calls.
-- `build_pdf` maps a valid blob onto the resume sections and falls back to the base resume when the blob is
-  missing or invalid.
+- `build_pdf` applies the tracking URLs, certificate toggles, and payload rendering to a valid tuning
+  document, and falls back to the base resume when the blob is missing or invalid.
