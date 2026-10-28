@@ -12,6 +12,9 @@ the `Application` row) instead of preloading everything into `PipelineDeps`.
 The result is stored as **one JSON blob** on the application rather than one row per resume section, and
 the model provider moves from the individual prompt onto the application.
 
+Tools expose **specific named resources**, never arbitrary filesystem paths, and identify resources with
+**enum arguments** rather than free-form string keys.
+
 ## What exists today
 
 The pipeline (`job_applications/ai.py`) is already pydantic-ai based, but each output is its own call:
@@ -34,7 +37,7 @@ run, and each tool just returns a dict entry.
 The change is therefore three things:
 
 1. Collapse 11 calls into one call with one structured output.
-2. Replace the preloaded deps with real, lazy tools.
+2. Replace the preloaded deps with real, lazy tools over named resources.
 3. Replace the per-section `Prompt` rows with one JSON blob, and move provider selection to the application.
 
 ## Target shape
@@ -46,22 +49,53 @@ needs. One `run_sync` per application. `ai.py` becomes:
 
 ## File-by-file changes
 
+### Resource enums and mappings (`job_applications/models.py`)
+
+Define the resources the model may ask for as enums, and map them to files once:
+
+```python
+from enum import Enum
+
+class Company(str, Enum):
+    BVS = "BVS"
+    STAFFBASE = "Staffbase"
+    TENSPD = "10SPD"
+
+class SkillType(str, Enum):
+    FRONTEND = "frontend"
+    BACKEND = "backend"
+    DATABASE = "database"
+    INFRASTRUCTURE = "infrastructure"
+
+HISTORY_PATHS = {
+    Company.BVS: "supporting_documents/histories/bvs.md",
+    Company.STAFFBASE: "supporting_documents/histories/staffbase.md",
+    Company.TENSPD: "supporting_documents/histories/10SPD.md",
+}
+
+SKILL_PATHS = {
+    SkillType.FRONTEND: "supporting_documents/frontend_skills.md",
+    SkillType.BACKEND: "supporting_documents/backend_skills.md",
+    SkillType.DATABASE: "supporting_documents/database_skills.md",
+    SkillType.INFRASTRUCTURE: "supporting_documents/infrastructure_skills.md",
+}
+```
+
+The enum members mirror `job_histories` / `skills_types`; keep the enum values aligned with the `work`
+names in `json-resume.json` so `build_pdf()` can match entries directly.
+
 ### `job_applications/ai.py` (main work)
 
 - Replace `PROMPT_SPECS` with a single spec (`resume_tuning`).
-- Replace `JobAnalysis` and the per-stage outputs with one output model:
+- Replace `JobAnalysis` and the per-stage outputs with one output model, keyed by the enums:
 
 ```python
-class WorkBlurb(BaseModel):
-    key: str          # e.g. "bvs.md"
-    summary: str
-
 class TuningResult(BaseModel):
     header: str
     csl: list[str]
-    job_names: list[str]            # one per history, in job_histories order
-    skills: dict[str, list[str]]    # frontend/backend/database/infrastructure
-    histories: list[WorkBlurb]
+    job_names: dict[Company, str]      # one job title per company
+    skills: dict[SkillType, list[str]] # one keyword list per skill type
+    histories: dict[Company, str]      # one blurb per company
 ```
 
 - Delete the stage machinery: `_parse_parent`, `build_context`, and the `stage` / `parent` /
@@ -73,11 +107,48 @@ class TuningResult(BaseModel):
 - `build_agent(application)` takes the provider from `application.provider`; the model cache stays keyed
   by provider.
 - `run_tuning` returns a `TuningResult`; on success it writes:
-  - `application.tuning = result.model_dump()` (the parsed blob),
+  - `application.tuning = result.model_dump(mode="json")` (the parsed blob; JSON mode turns enum keys
+    into their string values),
   - `prompt.response = result.model_dump_json()` (raw JSON, for audit/debug),
   - clears `prompt.error`.
 - On failure, set `prompt.error`; leave the previous `application.tuning` untouched.
 - Collapse the tier logic (`STRONG_MODEL` / `CHEAP_MODEL`) to a single model for the run (see tradeoffs).
+
+### New tool layer (in `ai.py` or a new `tools.py`)
+
+Every tool returns one fixed resource. There is no generic file reader and no path argument.
+
+| Tool | Signature | Returns |
+| --- | --- | --- |
+| `get_job_description` | `()` | `Application.description` |
+| `get_notes` | `()` | `Application.notes` (interview questions; currently unused by prompts) |
+| `get_history` | `(company: Company)` | contents of `HISTORY_PATHS[company]` |
+| `get_skills` | `(skill_type: SkillType)` | contents of `SKILL_PATHS[skill_type]` |
+| `get_resume` | `()` | the full `supporting_documents/json-resume.json` |
+
+```python
+def get_history(ctx: RunContext[PipelineDeps], company: Company) -> str:
+    """Return my work history for the given company."""
+    return read_supporting_document(HISTORY_PATHS[company])
+
+def get_skills(ctx: RunContext[PipelineDeps], skill_type: SkillType) -> str:
+    """Return my skills for the given skill type."""
+    return read_supporting_document(SKILL_PATHS[skill_type])
+```
+
+Implementation details:
+
+- **No paths.** The tool schema exposes only the enum members, so the model cannot request an arbitrary
+  file; the path-traversal surface disappears. `read_supporting_document` stays an internal helper used by
+  the tools (and by `Application.build_pdf`), not a tool itself.
+- **No list tools.** The enum argument documents the valid values in the tool schema, so
+  `list_histories` / `list_skill_types` are unnecessary.
+- **Threading.** pydantic-ai 2.59 executes sync tools via a thread executor (`run_in_executor` in
+  `_utils.py`). Django DB connections are thread-local, so a sync tool hitting `Application.objects`
+  opens a connection in that worker thread. Options:
+  - keep `application_id` in deps and use `sync_to_async(thread_sensitive=True)`;
+  - make the tools `async def`;
+  - keep the tools reading only files and add `django.db.close_old_connections()` around the run.
 
 ### Storage model: one JSON blob on the application
 
@@ -123,43 +194,19 @@ tuning = TuningResult.model_validate(self.tuning)
 
 - `resume["payload"]` from `tuning.csl`
 - `resume["basics"]["summary"]` from `tuning.header`
-- work positions from `zip(job_histories, tuning.job_names)`
-- work summaries from `{b.name: b.summary for b in tuning.histories}`
+- work positions from `tuning.job_names` (iterate `Company` members or the mapping)
+- work summaries from `tuning.histories`, matched to `work` entries by `Company` value
 - skill keywords from `tuning.skills`, mapped through `SKILL_PROMPT_TO_NAME`
 
 Keep the URL rewriting, email, certificate toggles, and `generate_pdf()` call unchanged. If
 `self.tuning` is null or invalid, fall back to the untouched `json-resume.json` (log a warning) so
 `build_pdf()` does not break on applications that have never been tuned.
 
-### New tool layer (in `ai.py` or a new `tools.py`)
-
-| Tool | Reads | Notes |
-| --- | --- | --- |
-| `get_job_description()` | `Application.description` | no args |
-| `get_notes()` | `Application.notes` | interview questions; currently unused by prompts |
-| `list_histories()` | `job_histories` / docs dir | lets the model discover valid keys instead of guessing |
-| `get_history(company_key)` | `supporting_documents/histories/*.md` | validate against allowlist |
-| `list_skill_types()` | `skills_types` | |
-| `get_skills(skill_type)` | `supporting_documents/*_skills.md` | validate against allowlist |
-| `get_resume_section(section)` | `json-resume.json` | optional: lets the model see current positions/dates |
-| `read_supporting_document(path)` | filesystem | only if free-form access is wanted; must be sandboxed |
-
-Implementation details:
-
-- **Path safety.** A general file reader must resolve the path and assert it stays under
-  `supporting_documents/`; otherwise the model can request `../../.env`.
-- **Threading.** pydantic-ai 2.59 executes sync tools via a thread executor (`run_in_executor` in
-  `_utils.py`). Django DB connections are thread-local, so a sync tool hitting `Application.objects`
-  opens a connection in that worker thread. Options:
-  - keep `application_id` in deps and use `sync_to_async(thread_sensitive=True)`;
-  - make the tools `async def`;
-  - keep tools filesystem-only and add `django.db.close_old_connections()` around the run.
-
 ### Templates (`application_manager/application_manager/templates/`)
 
 - Add one `tuning.md` holding every instruction currently spread across `csl.md`, `job_name.md`,
-  `skills_list.md`, `job_blurb.md`, `resume_header.md`, telling the model to call tools instead of
-  expecting preloaded context.
+  `skills_list.md`, `job_blurb.md`, `resume_header.md`, telling the model to call the named tools instead
+  of expecting preloaded context.
 - Delete the six now-unused templates; keep `payload.html` and `breakout.md`.
 
 ### `job_applications/tasks.py`
@@ -178,8 +225,8 @@ Implementation details:
 
 ### `services.py`
 
-- No strict changes. `read_supporting_document` is already the right primitive; add
-  `list_supporting_documents()` and an allowlist/sandbox check.
+- Keep `read_supporting_document` as the internal primitive for the fixed resource mappings. Do not
+  expose a general filesystem reader.
 
 ### `management/commands/generate_prompts.py`
 
@@ -210,8 +257,10 @@ Implementation details:
   reference.
 - **Provider per application.** Each application can select its own model, which is useful for comparing
   providers, but means the provider must be set before a run (fall back to a configured default).
-- **Prompt bloat.** The model must know which keys exist (`bvs.md`, `10SPD.md`, ...), so expose `list_*`
-  tools and validate against enums/allowlists rather than free strings.
+- **Enum serialization.** `dict[Company, ...]` is stored as string-keyed JSON; re-validating with
+  `TuningResult.model_validate` coerces those keys back to enum members.
+- **Tool surface.** Fixed resources mean adding a new company or skill type requires a new enum member and
+  mapping entry, not a prompt change.
 - **Caching.** `run_pipeline` currently skips a prompt when its rendered description is unchanged. With one
   call there is one cache key. Hash the application fields plus the content of every supporting document,
   because lazily fetched tool data never appears in the rendered template.
@@ -220,21 +269,21 @@ Implementation details:
 
 ## Suggested sequencing
 
-1. Add `Application.provider` and `Application.tuning`; move the provider admin field; remove
-   `Prompt.provider` / `parent`.
-2. Add the output model and tool functions; prove one `run_sync` end-to-end against a sample application
-   from the Django shell.
+1. Add `Company` / `SkillType` enums and the path mappings; add `Application.provider` and
+   `Application.tuning`; move the provider admin field; remove `Prompt.provider` / `parent`.
+2. Add the output model and the named resource tools; prove one `run_sync` end-to-end against a sample
+   application from the Django shell.
 3. Rewrite `build_pdf()` to read `application.tuning`, with a fallback to the base resume.
 4. Swap `run_pipeline` for the single runner, delete the stage machinery and old templates.
-5. Add cache hashing and tests (tool allowlist, path traversal, blob validation, `build_pdf` mapping).
+5. Add cache hashing and tests (enum validation, blob validation, `build_pdf` mapping).
 
 ## Open questions
 
-1. **Tools:** live DB/FS queries, or keep preloaded deps and only consolidate the calls? Live queries are
-   the point of the request but add the threading and path-safety work above.
+1. **Tools:** live DB/FS reads per call, or keep preloaded deps and only consolidate the calls? Live reads
+   are the point of the request but add the threading work above.
 2. **Model tier:** one strong model for the single call, or split analysis + generation to keep some cheap
    calls?
-3. **Tool scope:** may the model read current `json-resume.json` sections (to reuse existing positions and
-   dates), or only histories, skills, and notes?
+3. **Tool scope:** expose `get_resume` (the full current `json-resume.json`) so the model can reuse
+   existing positions and dates, or only histories, skills, and notes?
 4. **Prompt row:** keep the single `resume_tuning` row as an audit record (planned here), or drop the
    `Prompt` model entirely now that provider and output live on `Application`?
