@@ -106,7 +106,8 @@ class ResearchCompanyTests(SimpleTestCase):
 class ProviderAuthTests(SimpleTestCase):
     def provider(self, env_key="TEST_PROVIDER_KEY"):
         return PromptProvider(
-            name="test-model",
+            name="test-provider",
+            model="test-model",
             url="https://example.com/v1",
             env_key=env_key,
         )
@@ -129,7 +130,7 @@ class ProviderAuthTests(SimpleTestCase):
 
         with patch.dict(os.environ, {"TEST_PROVIDER_KEY": "secret"}):
             with patch.object(ai, "AsyncOpenAI") as openai_client:
-                with patch.object(ai, "OpenAIChatModel"):
+                with patch.object(ai, "OpenAIChatModel") as chat_model:
                     with patch.object(ai, "OpenAIProvider"):
                         with patch.object(ai, "Agent") as agent:
                             ai.build_agent(application)
@@ -139,6 +140,7 @@ class ProviderAuthTests(SimpleTestCase):
             api_key="secret",
             timeout=60,
         )
+        self.assertEqual(chat_model.call_args.args[0], "test-model")
         agent.return_value.tool.assert_called()
 
 
@@ -196,6 +198,7 @@ class RunTuningTests(TestCase):
     def setUp(self):
         self.provider = PromptProvider.objects.create(
             name="test-provider",
+            model="test-model",
             url="https://example.com/v1",
             env_key="TEST_PROVIDER_KEY",
         )
@@ -263,6 +266,7 @@ class EnsureCompanyResearchTests(TestCase):
     def setUp(self):
         provider = PromptProvider.objects.create(
             name="test-provider",
+            model="test-model",
             url="https://example.com/v1",
             env_key="TEST_PROVIDER_KEY",
         )

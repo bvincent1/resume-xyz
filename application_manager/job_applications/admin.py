@@ -213,7 +213,7 @@ class JobURLAdmin(ModelAdmin):
 
 
 class PromptProviderAdmin(ModelAdmin):
-    list_display = ("name", "url", "env_key")
+    list_display = ("name", "model", "url", "env_key")
 
 
 # Register your models here.

@@ -428,7 +428,7 @@ def build_agent(application: Application) -> Agent:
         timeout=60,
     )
     model = OpenAIChatModel(
-        provider.name,
+        provider.model,
         provider=OpenAIProvider(openai_client=client),
     )
 

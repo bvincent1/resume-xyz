@@ -262,9 +262,15 @@ class PromptProvider(models.Model):
         null=False,
         unique=True,
         help_text=(
-            "Model id sent to the API, e.g. 'openai/gpt-4.1'. Selected per "
+            "Provider name or label, e.g. 'OpenRouter'. Selected per "
             "application through Application.provider."
         ),
+    )
+    model = models.CharField(
+        max_length=255,
+        blank=False,
+        default="",
+        help_text="Model id sent to the API, e.g. 'openai/gpt-4.1'.",
     )
     url = models.URLField(
         blank=False,
