@@ -421,13 +421,10 @@ def _api_key_for(provider: PromptProvider) -> str:
 def build_agent(application: Application) -> Agent:
     """Build the single tuning agent for an application."""
     provider = application.provider
-    headers = provider.render_headers()
-    headers.pop("Authorization", None)
 
     client = AsyncOpenAI(
         base_url=provider.url,
         api_key=_api_key_for(provider),
-        default_headers=headers,
         timeout=60,
     )
     model = OpenAIChatModel(

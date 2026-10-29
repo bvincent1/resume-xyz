@@ -3,7 +3,7 @@ import boto3
 from botocore.config import Config
 import os
 from django.conf import settings
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment, FileSystemLoader
 
 file_env = Environment(
     loader=FileSystemLoader(str(settings.BASE_DIR / "application_manager"))
@@ -46,17 +46,4 @@ def render_template(path="", **context):
         str: Templated file str
     """
     return file_env.get_template(path).render(**(context | {"env": os.environ}))
-
-
-def render_string(source="", render_args={}):
-    """Renders Jinja templating over provided string. Default applies "env" vars.
-
-    Args:
-        source (str, optional): Source string to template. Defaults to "".
-        render_args (dict, optional): kwargs to template with, Default includes `{"env": ...}`. Defaults to {}.
-
-    Returns:
-        str: Templated string
-    """
-    return Template(source=source).render(**(render_args | {"env": os.environ}))
 

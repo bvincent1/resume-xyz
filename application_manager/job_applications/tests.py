@@ -108,7 +108,6 @@ class ProviderAuthTests(SimpleTestCase):
         return PromptProvider(
             name="test-model",
             url="https://example.com/v1",
-            headers={},
             env_key=env_key,
         )
 
@@ -138,7 +137,6 @@ class ProviderAuthTests(SimpleTestCase):
         openai_client.assert_called_once_with(
             base_url="https://example.com/v1",
             api_key="secret",
-            default_headers={},
             timeout=60,
         )
         agent.return_value.tool.assert_called()
@@ -199,7 +197,6 @@ class RunTuningTests(TestCase):
         self.provider = PromptProvider.objects.create(
             name="test-provider",
             url="https://example.com/v1",
-            headers={},
             env_key="TEST_PROVIDER_KEY",
         )
         self.application = Application.objects.create(
@@ -267,7 +264,6 @@ class EnsureCompanyResearchTests(TestCase):
         provider = PromptProvider.objects.create(
             name="test-provider",
             url="https://example.com/v1",
-            headers={},
             env_key="TEST_PROVIDER_KEY",
         )
         self.application = Application.objects.create(

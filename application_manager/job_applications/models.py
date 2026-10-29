@@ -10,7 +10,6 @@ from django.db import models, transaction
 from .services import (
     generate_pdf,
     read_supporting_document,
-    render_string,
     render_template,
 )
 
@@ -281,20 +280,9 @@ class PromptProvider(models.Model):
             "'OPENROUTER_API_KEY'."
         ),
     )
-    headers = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text=(
-            "Additional HTTP headers sent with every request. Auth comes from "
-            "`env_key`, not from this mapping."
-        ),
-    )
 
     def __str__(self):
         return self.name
-
-    def render_headers(self):
-        return json.loads(render_string(json.dumps(self.headers)))
 
 
 class Prompt(models.Model):
