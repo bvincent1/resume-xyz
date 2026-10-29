@@ -18,10 +18,10 @@
 
     {{#if url}}
       <div class="basics-contact-row">
-        <span class="basics-contact-item"><a href="{{url}}">{{url}}</a></span>
+        <span class="basics-contact-item"><a href="{{url}}">{{network}}</a></span>
         {{#each profiles}}
           {{#if url}}
-            <span class="basics-contact-item"><a href="{{url}}">{{STRIP_PROTOCOL url}}</a></span>
+            <span class="basics-contact-item"><a href="{{url}}">{{network}}</a></span>
           {{/if}}
         {{/each}}
       </div>
@@ -30,7 +30,7 @@
         <div class="basics-contact-row">
           {{#each profiles}}
             {{#if url}}
-              <span class="basics-contact-item"><a href="{{url}}">{{STRIP_PROTOCOL url}}</a></span>
+              <span class="basics-contact-item"><a href="{{url}}">{{network}}</a></span>
             {{/if}}
           {{/each}}
         </div>
