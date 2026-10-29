@@ -32,7 +32,7 @@ services:
     environment:
       RABBITMQ_CLIENT_HOST: rabbitmq
       RABBITMQ_CLIENT_PORT: 5672
-      RESUME_SERVICE_HOST: http://resume:3000
+      # RESUME_SERVICE_HOST: http://resume:3000
     command: /bin/sh -c 'make dev'
     ports:
       - "9099:9099"
@@ -48,7 +48,7 @@ services:
     environment:
       RABBITMQ_CLIENT_HOST: rabbitmq
       RABBITMQ_CLIENT_PORT: 5672
-      RESUME_SERVICE_HOST: http://resume:3000
+      # RESUME_SERVICE_HOST: http://resume:3000
     command: /bin/sh -c 'make worker'
 
   celery_scheduler:
@@ -61,7 +61,6 @@ services:
     environment:
       RABBITMQ_CLIENT_HOST: rabbitmq
       RABBITMQ_CLIENT_PORT: 5672
-      STORAGE_HOST: http://minio:9000
     command: /bin/sh -c 'make scheduler'
 
 volumes:
