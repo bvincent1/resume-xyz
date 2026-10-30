@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: resume_e2e
+    ports:
+      # 55432 keeps the E2E database clear of the dev stack on 5459.
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resume_e2e"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  resume:
+    build:
+      context: ../json-resume-api
+      dockerfile: Dockerfile.node
+    environment:
+      PORT: 3000
+    ports:
+      # 3001 keeps the E2E renderer clear of the dev renderer on 3000.
+      - "3001:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/').then(() => process.exit(0)).catch(() => process.exit(1))\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30

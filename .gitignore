@@ -55,3 +55,8 @@ apps/client/src/locales/*/messages.mjs
 __pycache__/
 
 nohup.out
+
+# Playwright E2E artifacts
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/
