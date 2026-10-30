@@ -3,14 +3,21 @@ import json
 import os
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from jsonschema import ValidationError
+from tinyfish import (
+    FetchError,
+    FetchResponse,
+    FetchResult,
+    SearchQueryResponse,
+    SearchResult,
+)
 
-from . import ai
+from . import ai, tasks
 from .models import Application, PromptProvider, read_supporting_document
 
 
@@ -309,3 +316,133 @@ class EnsureCompanyResearchTests(TestCase):
 
         self.assertEqual(brief, "forced brief")
         build.assert_called_once_with("Acme")
+
+
+class GenerateCompanyBriefTaskTests(TestCase):
+    """Run the Celery task against a fake TinyFish SDK boundary."""
+
+    def setUp(self):
+        provider = PromptProvider.objects.create(
+            name="test-provider",
+            model="test-model",
+            url="https://example.com/v1",
+            env_key="TEST_PROVIDER_KEY",
+        )
+        self.application = Application.objects.create(
+            title="Engineer",
+            description="Build things",
+            company="Acme",
+            provider=provider,
+        )
+
+    def _search_result(self, url="https://acme.test/engineering"):
+        return SearchResult(
+            position=1,
+            site_name="Acme",
+            snippet="Acme builds things.",
+            title="Acme engineering",
+            url=url,
+        )
+
+    def _client(self, *, results, pages):
+        client = MagicMock()
+        client.search.query.return_value = SearchQueryResponse(
+            query="Acme company overview products engineering blog recent news",
+            results=results,
+            total_results=len(results),
+        )
+        client.fetch.get_contents.return_value = pages
+        return client
+
+    def _run_task(self, client):
+        with patch.dict(os.environ, {"TINYFISH_API_KEY": "test"}):
+            with patch("tinyfish.TinyFish", return_value=client):
+                return tasks.generate_company_brief.apply(
+                    args=[self.application.pk]
+                )
+
+    def test_task_crawls_pages_and_persists_brief(self):
+        self.application.company_research = "cached brief"
+        self.application.company_researched_at = timezone.now()
+        self.application.save()
+
+        client = self._client(
+            results=[self._search_result()],
+            pages=FetchResponse(
+                results=[
+                    FetchResult(
+                        url="https://acme.test/engineering",
+                        title="Acme engineering",
+                        text="We build widgets.",
+                        format="markdown",
+                    )
+                ],
+                errors=[],
+            ),
+        )
+
+        result = self._run_task(client)
+
+        self.assertTrue(result.successful())
+        self.application.refresh_from_db()
+        self.assertIn("# Acme research", self.application.company_research)
+        self.assertIn(
+            "Source: https://acme.test/engineering",
+            self.application.company_research,
+        )
+        self.assertIn("We build widgets.", self.application.company_research)
+        self.assertIsNotNone(self.application.company_researched_at)
+
+        client.search.query.assert_called_once_with(
+            query="Acme company overview products engineering blog recent news",
+            purpose="company background for resume tailoring",
+        )
+        self.assertEqual(
+            client.fetch.get_contents.call_args.kwargs["urls"],
+            ["https://acme.test/engineering"],
+        )
+
+    def test_task_keeps_pages_when_a_fetch_fails(self):
+        client = self._client(
+            results=[self._search_result()],
+            pages=FetchResponse(
+                results=[
+                    FetchResult(
+                        url="https://acme.test/engineering",
+                        title="Acme engineering",
+                        text="We build widgets.",
+                        format="markdown",
+                    )
+                ],
+                errors=[
+                    FetchError(
+                        url="https://acme.test/news", error="timeout"
+                    )
+                ],
+            ),
+        )
+
+        result = self._run_task(client)
+
+        self.assertTrue(result.successful())
+        self.application.refresh_from_db()
+        self.assertIn("We build widgets.", self.application.company_research)
+        self.assertIn(
+            "- could not fetch https://acme.test/news: timeout",
+            self.application.company_research,
+        )
+
+    def test_task_records_unavailable_brief_without_stamping_cache(self):
+        client = MagicMock()
+        client.search.query.side_effect = RuntimeError("boom")
+
+        with self.assertLogs("job_applications.ai", level="ERROR"):
+            result = self._run_task(client)
+
+        self.assertTrue(result.successful())
+        self.application.refresh_from_db()
+        self.assertEqual(
+            self.application.company_research,
+            "Company research unavailable: boom.",
+        )
+        self.assertIsNone(self.application.company_researched_at)
