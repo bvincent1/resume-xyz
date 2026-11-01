@@ -1,0 +1,79 @@
+openapi: 3.0.3
+info:
+  title: Resume XYZ API
+  version: 0.1.0
+paths:
+  /api/job-automation/job-urls/:
+    post:
+      operationId: api_job_automation_job_urls_create
+      summary: Create a job URL and queue a scan
+      tags:
+      - api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobURLInput'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/JobURLInput'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/JobURLInput'
+        required: true
+      security:
+      - ApiKeyAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobURLOutput'
+          description: ''
+        '401':
+          description: Invalid or missing API key.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobURLConflict'
+          description: ''
+components:
+  schemas:
+    JobURLConflict:
+      type: object
+      properties:
+        detail:
+          type: string
+        id:
+          type: integer
+      required:
+      - detail
+      - id
+    JobURLInput:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+      required:
+      - url
+    JobURLOutput:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          format: uri
+        status:
+          type: string
+      required:
+      - id
+      - status
+      - url
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

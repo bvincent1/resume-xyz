@@ -55,6 +55,10 @@ tests:
 		$(DJANGO) test job_applications job_automation -v 2
 .PHONY: tests
 
+schema:
+	@$(DJANGO) spectacular --file openapi-schema.yml --validate
+.PHONY: schema
+
 backup:
 	@pg_dump -a -O -f backup.tar -Ft -d $(DB_CONNECTION)
 .PHONY: backup
