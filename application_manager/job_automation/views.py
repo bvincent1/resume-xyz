@@ -2,6 +2,7 @@ import secrets
 
 from django.conf import settings
 from django.db import transaction
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
@@ -31,10 +32,30 @@ class JobURLInputSerializer(serializers.Serializer):
     url = serializers.URLField()
 
 
+class JobURLOutputSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    url = serializers.URLField()
+    status = serializers.CharField(source="status.name")
+
+
+class JobURLConflictSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    id = serializers.IntegerField()
+
+
 class JobURLView(APIView):
     authentication_classes = [APIKeyAuthentication]
     permission_classes = []
 
+    @extend_schema(
+        summary="Create a job URL and queue a scan",
+        request=JobURLInputSerializer,
+        responses={
+            201: JobURLOutputSerializer,
+            401: OpenApiResponse(description="Invalid or missing API key."),
+            409: JobURLConflictSerializer,
+        },
+    )
     def post(self, request):
         data = JobURLInputSerializer(data=request.data)
         data.is_valid(raise_exception=True)
@@ -46,17 +67,15 @@ class JobURLView(APIView):
         )
         if not created:
             return Response(
-                {"detail": "already exists", "id": job_url.pk},
+                JobURLConflictSerializer(
+                    {"detail": "already exists", "id": job_url.pk}
+                ).data,
                 status=409,
             )
 
         transaction.on_commit(lambda: scan_job_url_task.delay(job_url.pk))
 
         return Response(
-            {
-                "id": job_url.pk,
-                "url": job_url.url,
-                "status": job_url.status.name,
-            },
+            JobURLOutputSerializer(job_url).data,
             status=201,
         )
