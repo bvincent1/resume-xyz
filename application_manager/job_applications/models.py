@@ -149,12 +149,18 @@ class Application(models.Model):
         )
 
     def save(self, **kwargs):
-        dispatch = False  # self._prompt_inputs_changed()
+        dispatch = (
+            self._prompt_inputs_changed()
+            and bool(self.company)
+            and bool(self.description)
+        )
         super().save(**kwargs)
         if dispatch:
-            from .tasks import dispatch_generate_prompts
+            from .tasks import dispatch_application_pipeline
 
-            transaction.on_commit(lambda: dispatch_generate_prompts(self.pk))
+            transaction.on_commit(
+                lambda: dispatch_application_pipeline(self.pk)
+            )
 
     def list_prompts(self):
         try:

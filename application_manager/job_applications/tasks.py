@@ -2,11 +2,10 @@ import logging
 
 from django.utils import timezone
 from subprocess import call
-from celery import shared_task
+from celery import chain, shared_task
 from django.apps import apps
 import os
 import requests
-from pyppeteer import connect
 from datetime import timedelta
 from django.conf import settings
 
@@ -28,17 +27,21 @@ def fill_in_prompts():
     app.save()
 
 
-def dispatch_generate_prompts(application_id: int) -> None:
-    """Best-effort dispatch of the prompt pipeline.
+def dispatch_application_pipeline(application_id: int) -> None:
+    """Research the company, then refine the resume, for one application.
 
-    Called from `Application.save()` on commit, so a broker that is down must
-    not break the admin save.
+    Chained so the research brief is persisted before tuning reads it. Called
+    from `Application.save()` on commit, so a broker that is down must not
+    break the admin save.
     """
     try:
-        generate_prompts.delay(application_id)
+        chain(
+            generate_company_brief.si(application_id),
+            generate_prompts.si(application_id),
+        ).apply_async()
     except Exception:
         logger.warning(
-            "could not dispatch generate_prompts for application %s",
+            "could not dispatch pipeline for application %s",
             application_id,
             exc_info=True,
         )
