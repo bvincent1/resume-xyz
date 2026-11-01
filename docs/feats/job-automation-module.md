@@ -1,6 +1,6 @@
 # Job automation module
 
-Status: planned, not started.
+Status: implemented in `eb5d49a7`.
 
 ## Goal
 
