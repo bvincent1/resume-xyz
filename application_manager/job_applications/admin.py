@@ -1,11 +1,6 @@
-from json import loads
-import os
-import pprint
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 from unfold.contrib.filters.admin import FieldTextFilter, RelatedCheckboxFilter
-from django.apps import apps
-from subprocess import run, PIPE
 from django.http import HttpRequest
 from django.shortcuts import redirect
 from unfold.decorators import action
@@ -18,9 +13,7 @@ from django.db import models
 from .models import (
     ApplicationStatus,
     Application,
-    JobURL,
     Prompt,
-    URLStatus,
     PromptProvider,
 )
 from .tasks import generate_prompts, generate_company_brief
@@ -186,32 +179,6 @@ class StatusAdmin(ModelAdmin):
     pass
 
 
-class URLStatusAdmin(ModelAdmin):
-    pass
-
-
-class JobURLAdmin(ModelAdmin):
-
-    @action(description="Get job info")
-    def get_job_info(self, request, queryset):
-        urls_string = ",".join([url.url for url in queryset])
-        result = run(
-            ["node", "./src/getJobInfo.mjs", urls_string],
-            cwd=os.path.join(
-                apps.get_app_config("job_applications").path,
-                "../../scraper",
-            ),
-            stderr=PIPE,
-            stdout=PIPE,
-            text=True,
-        )
-        if result.returncode == 0:
-            job_infos = loads(result.stdout)
-            pprint.pprint(job_infos)
-
-        self.message_user(request, "Prompts regenerated successfully.")
-
-
 class PromptProviderAdmin(ModelAdmin):
     list_display = ("name", "model", "url", "env_key")
 
@@ -220,6 +187,4 @@ class PromptProviderAdmin(ModelAdmin):
 admin.site.register(ApplicationStatus, StatusAdmin)
 admin.site.register(Application, ApplicationAdmin)
 admin.site.register(Prompt, PromptAdmin)
-admin.site.register(URLStatus, URLStatusAdmin)
-admin.site.register(JobURL, JobURLAdmin)
 admin.site.register(PromptProvider, PromptProviderAdmin)

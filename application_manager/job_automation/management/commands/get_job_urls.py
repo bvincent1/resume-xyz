@@ -1,9 +1,10 @@
+from json import loads
+from subprocess import PIPE, run
+
 from django.apps import apps
 from django.core.management.base import BaseCommand
-from pprint import pprint
-from subprocess import run, PIPE
-from json import loads
-from job_applications.models import JobURL, URLStatus
+
+from job_automation.models import JobURL, URLStatus
 
 
 class Command(BaseCommand):
@@ -24,7 +25,7 @@ class Command(BaseCommand):
             for u in result_urls:
                 try:
                     JobURL(url=u, status=URLStatus.objects.get(name="todo")).save()
-                except:
+                except Exception:
                     print(f"something went wrong trying to parse: {u}")
 
             self.stdout.write(

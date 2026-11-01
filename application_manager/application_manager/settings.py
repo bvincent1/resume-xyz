@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "accounts",
     "job_applications",
+    "job_automation",
     "django_celery_beat",
     "django_extensions",
     "simple_history",
@@ -154,6 +155,9 @@ CORS_ORIGIN_ALLOW_ALL = True
 LOGIN_URL = "/admin/login/"
 
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+# Key the job-automation API requires in the X-API-Key header.
+JOB_AUTOMATION_API_KEY = os.getenv("JOB_AUTOMATION_API_KEY", "")
 
 
 UNFOLD = {

@@ -15,6 +15,7 @@ install:
 migrations:
 	@$(DJANGO) makemigrations accounts
 	@$(DJANGO) makemigrations job_applications
+	@$(DJANGO) makemigrations job_automation
 	@$(DJANGO) migrate
 .PHONY: migrations
 
@@ -51,7 +52,7 @@ tests:
 	@docker run --rm -d --name resume-test-pg \
 		-e POSTGRES_PASSWORD=postgres -p 5459:5432 postgres:16-alpine
 	@POSTGRES_URL="postgres://postgres:postgres@localhost:5459/postgres" \
-		$(DJANGO) test job_applications -v 2
+		$(DJANGO) test job_applications job_automation -v 2
 .PHONY: tests
 
 backup:
