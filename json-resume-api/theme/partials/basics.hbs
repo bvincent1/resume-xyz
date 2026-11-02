@@ -9,7 +9,7 @@
         {{/if}}
       {{/location}}
       {{#if email}}
-        <span class="basics-contact-item"><a href="mailto:{{email}}">{{email}}</a></span>
+        <span class="basics-contact-item"><a href="mailto:{{email}}">{{regexReplace email "\+.*@" "gi" "@"}}</a></span>
       {{/if}}
       {{#if phone}}
         <span class="basics-contact-item"><a href="tel:{{phone}}">{{{FORMAT_PHONE phone}}}</a></span>

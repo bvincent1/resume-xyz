@@ -3,6 +3,7 @@ import os
 
 from celery import shared_task
 from pydantic import BaseModel
+from pydantic.json_schema import GenerateJsonSchema
 
 from job_applications.models import Application, PromptProvider
 
@@ -12,21 +13,17 @@ from .models import JobURL, URLStatus
 logger = logging.getLogger(__name__)
 
 
-def _strip_title_keys(node):
-    """Drop JSON Schema ``title`` annotations Pydantic injects.
 
-    ``JobPosting.model_json_schema()`` adds ``"title": "<ClassName>"`` at the
-    root and ``"title": "<FieldName>"`` on every property. TinyFish rejects
-    the ``title`` keyword anywhere in ``output_schema``, so walk the generated
-    schema and pop the keyword at every depth before sending it.
-    """
-    if isinstance(node, dict):
-        node.pop("title", None)
-        for value in node.values():
-            _strip_title_keys(value)
-    elif isinstance(node, list):
-        for item in node:
-            _strip_title_keys(item)
+class NoTitlesJsonSchema(GenerateJsonSchema):
+
+  def field_title_should_be_set(self, schema) -> bool:
+    return False
+
+  def generate(self, schema, mode="validation"):
+    json_schema = super().generate(schema, mode=mode)
+    # Safely removes the top-level schema title
+    json_schema.pop("title", None)
+    return json_schema
 
 
 class JobPosting(BaseModel):
@@ -46,8 +43,9 @@ def scan_posting(url: str) -> JobPosting:
     client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=120)
     # TinyFish rejects the JSON Schema `title` keyword at any depth; strip
     # the ones Pydantic annotates before sending.
-    output_schema = JobPosting.model_json_schema()
-    _strip_title_keys(output_schema)
+    output_schema = JobPosting.model_json_schema(schema_generator=NoTitlesJsonSchema)
+    print(output_schema)
+
     response = client.agent.run(
         goal=(
             "Extract the role title, the hiring company, and the full job "

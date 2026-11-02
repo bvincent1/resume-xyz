@@ -45,6 +45,12 @@ Handlebars.registerHelper('join', (arr, separator) =>
   arr.join(typeof separator === 'string' ? separator : ', '),
 )
 
+Handlebars.registerHelper('regexReplace', function (haystack, pattern, flags, replacement) {
+  if (typeof haystack !== 'string') return '';
+  const regex = new RegExp(pattern, flags);
+  return haystack.replace(regex, replacement);
+});
+
 // FORMAT_PHONE replaces spaces with &nbsp; and hyphens with &#8209; (non-breaking variants)
 // to prevent browsers from wrapping phone numbers mid-digit (e.g. "(912) 555-" / "4321").
 // Triple braces {{{FORMAT_PHONE phone}}} are required in the template so Handlebars
