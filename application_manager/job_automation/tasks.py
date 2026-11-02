@@ -12,6 +12,23 @@ from .models import JobURL, URLStatus
 logger = logging.getLogger(__name__)
 
 
+def _strip_title_keys(node):
+    """Drop JSON Schema ``title`` annotations Pydantic injects.
+
+    ``JobPosting.model_json_schema()`` adds ``"title": "<ClassName>"`` at the
+    root and ``"title": "<FieldName>"`` on every property. TinyFish rejects
+    the ``title`` keyword anywhere in ``output_schema``, so walk the generated
+    schema and pop the keyword at every depth before sending it.
+    """
+    if isinstance(node, dict):
+        node.pop("title", None)
+        for value in node.values():
+            _strip_title_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_title_keys(item)
+
+
 class JobPosting(BaseModel):
     title: str
     company: str
@@ -27,10 +44,10 @@ def scan_posting(url: str) -> JobPosting:
     from tinyfish import TinyFish  # local import so tests can patch the SDK
 
     client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=120)
-    # TinyFish rejects a top-level `title` key in `output_schema`; Pydantic
-    # adds one as JSON Schema metadata, so strip it before sending.
+    # TinyFish rejects the JSON Schema `title` keyword at any depth; strip
+    # the ones Pydantic annotates before sending.
     output_schema = JobPosting.model_json_schema()
-    output_schema.pop("title", None)
+    _strip_title_keys(output_schema)
     response = client.agent.run(
         goal=(
             "Extract the role title, the hiring company, and the full job "
