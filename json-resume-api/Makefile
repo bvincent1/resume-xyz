@@ -9,8 +9,12 @@ dev: ## run the server
 	@pnpm nodemon src/index.js
 .PHONY: dev
 
-clean: ## remove generated PDFs from the public dir
-	@rm -f public/*.pdf
+test: ## run the route tests
+	@pnpm test
+.PHONY: test
+
+clean: ## remove generated documents from the public dir
+	@rm -f public/*.pdf public/*.html
 .PHONY: clean
 
 prod:

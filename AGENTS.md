@@ -4,7 +4,7 @@ Personal resume / job-application toolkit. Three independent subprojects, no roo
 
 ## Layout
 - `application_manager/` — Django 5.1 admin-only app (the main project). Entrypoint `application_manager/manage.py`; settings module `application_manager.settings`; `/` redirects to `/admin/`. Custom user `accounts.CustomUser` (email login, `AUTH_USER_MODEL`).
-- `json-resume-api/` — Express 5 + puppeteer. `POST /resume` renders a JSON Resume object to a PDF under `public/`. `src/index.js` renders through the local `theme/` Handlebars package (`require('../theme')`).
+- `json-resume-api/` — Express 5 + puppeteer. `POST /resume/pdf` renders a JSON Resume object to a PDF under `public/`; `POST /resume/html` writes the rendered HTML document instead. `src/index.js` renders through the local `theme/` Handlebars package (`require('../theme')`).
 - `cf-redirect-worker/` — Cloudflare Worker (TypeScript + wrangler + Hyperdrive). Redirects `*.deuterium.dev` and logs query strings to Postgres table `tracking.cloudflare_logs`.
 - `resume.json` is the Reactive Resume export format (no longer read by the app); `json-resume.json` (under `application_manager/application_manager/supporting_documents/`) is the JSON Resume format that Django `Application.build_pdf()` reads from the local filesystem and POSTs to the `json-resume-api`.
 
@@ -27,7 +27,7 @@ Root `Makefile`, `Dockerfile.node`, `.vscode/settings.json`, and `.dockerignore`
 
 ### json-resume-api (run in `json-resume-api/`)
 - `make install` → `pnpm install`; `make dev` → `pnpm start` (`node src/index.js`); `make clean` → delete `public/*.pdf`.
-- No runnable tests: `pnpm test` is a stub, and `theme/index.test.js` needs `jest` + `html-validate`, which are not dependencies.
+- `pnpm test` (or `make test`) runs the route tests in `test/` with Node's built-in test runner. `theme/index.test.js` still needs `jest` + `html-validate`, which are not dependencies, and is not picked up by the test script.
 
 ### cf-redirect-worker (run in `cf-redirect-worker/`)
 - `make install`; `make types` → `wrangler types`; `make deploy`; `make dev` requires a root `.env` to build the Hyperdrive local connection string.

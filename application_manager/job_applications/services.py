@@ -18,7 +18,7 @@ def generate_pdf(resume, host=None):
     """
     host = (host or os.getenv("RESUME_SERVICE_HOST", "")).rstrip("/")
 
-    r = requests.post(f"{host}/resume", json=resume)
+    r = requests.post(f"{host}/resume/pdf", json=resume)
     r.raise_for_status()
 
     return f"{host}{r.json()['path']}"
