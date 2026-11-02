@@ -13,13 +13,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/JobURL'
+              $ref: '#/components/schemas/JobURLRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/JobURL'
+              $ref: '#/components/schemas/JobURLRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/JobURL'
+              $ref: '#/components/schemas/JobURLRequest'
         required: true
       security:
       - ApiKeyAuth: []
@@ -50,6 +50,16 @@ components:
       required:
       - id
       - status
+      - url
+    JobURLRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 200
+      required:
       - url
   securitySchemes:
     ApiKeyAuth:
