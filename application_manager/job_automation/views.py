@@ -1,12 +1,15 @@
 import secrets
 
 from django.conf import settings
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.generics import CreateAPIView
 
 from .models import JobURL, URLStatus
 
@@ -26,52 +29,28 @@ class APIKeyAuthentication(BaseAuthentication):
         return "X-API-Key"
 
 
-class JobURLInputSerializer(serializers.Serializer):
-    url = serializers.URLField()
+class JobURLSerializer(serializers.ModelSerializer):
+    status = serializers.SlugRelatedField(slug_field="name", read_only=True)
+
+    class Meta:
+        model = JobURL
+        fields = ("id", "url", "status")
 
 
-class JobURLOutputSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    url = serializers.URLField()
-    status = serializers.CharField(source="status.name")
-
-
-class JobURLConflictSerializer(serializers.Serializer):
-    detail = serializers.CharField()
-    id = serializers.IntegerField()
-
-
-class JobURLView(APIView):
+@extend_schema_view(
+    post=extend_schema(
+        summary="Create a job URL and queue a scan",
+        responses={
+            201: JobURLSerializer,
+            401: OpenApiResponse(description="Invalid or missing API key."),
+        },
+    ),
+)
+class JobURLView(CreateAPIView):
     authentication_classes = [APIKeyAuthentication]
     permission_classes = []
+    serializer_class = JobURLSerializer
 
-    @extend_schema(
-        summary="Create a job URL and queue a scan",
-        request=JobURLInputSerializer,
-        responses={
-            201: JobURLOutputSerializer,
-            401: OpenApiResponse(description="Invalid or missing API key."),
-            409: JobURLConflictSerializer,
-        },
-    )
-    def post(self, request):
-        data = JobURLInputSerializer(data=request.data)
-        data.is_valid(raise_exception=True)
-
+    def perform_create(self, serializer):
         status, _created = URLStatus.objects.get_or_create(name="todo")
-        job_url, created = JobURL.objects.get_or_create(
-            url=data.validated_data["url"],
-            defaults={"status": status},
-        )
-        if not created:
-            return Response(
-                JobURLConflictSerializer(
-                    {"detail": "already exists", "id": job_url.pk}
-                ).data,
-                status=409,
-            )
-
-        return Response(
-            JobURLOutputSerializer(job_url).data,
-            status=201,
-        )
+        serializer.save(status=status)
