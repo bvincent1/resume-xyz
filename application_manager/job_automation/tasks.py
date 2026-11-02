@@ -27,13 +27,17 @@ def scan_posting(url: str) -> JobPosting:
     from tinyfish import TinyFish  # local import so tests can patch the SDK
 
     client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=120)
+    # TinyFish rejects a top-level `title` key in `output_schema`; Pydantic
+    # adds one as JSON Schema metadata, so strip it before sending.
+    output_schema = JobPosting.model_json_schema()
+    output_schema.pop("title", None)
     response = client.agent.run(
         goal=(
             "Extract the role title, the hiring company, and the full job "
             "description verbatim."
         ),
         url=url,
-        output_schema=JobPosting.model_json_schema(),
+        output_schema=output_schema,
     )
     if response.status != "COMPLETED" or not response.result:
         raise JobScanError(str(response.error) if response.error else "scan failed")
