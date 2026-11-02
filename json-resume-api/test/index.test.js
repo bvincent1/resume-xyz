@@ -1,13 +1,11 @@
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
-const { afterEach, describe, it } = require('node:test');
+const { describe, it } = require('node:test');
 
-const { createApp } = require('../src');
-
-const publicDir = path.join(__dirname, '..', 'public');
-const createdFiles = new Set();
+const createApp = require('../src');
 
 function makeResume(label) {
   return {
@@ -34,17 +32,20 @@ function makeResume(label) {
 }
 
 async function startApp(options = {}) {
-  const server = createApp(options).listen(0);
+  const publicDir = await fs.mkdtemp(path.join(os.tmpdir(), 'json-resume-api-test-'));
+  const server = createApp({ ...options, publicDir }).listen(0);
   await once(server, 'listening');
   const { port } = server.address();
 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
+    publicDir,
     async close() {
       const closed = once(server, 'close');
       server.close();
       server.closeAllConnections?.();
       await closed;
+      await fs.rm(publicDir, { recursive: true, force: true });
     },
   };
 }
@@ -55,12 +56,6 @@ function postJson(baseUrl, endpoint, body) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-}
-
-function track(filePath) {
-  const filename = filePath.replace(/^\//, '');
-  createdFiles.add(filename);
-  return filename;
 }
 
 function createFakeBrowser() {
@@ -91,15 +86,6 @@ function createFakeBrowser() {
   };
 }
 
-afterEach(async () => {
-  await Promise.all(
-    [...createdFiles].map((filename) =>
-      fs.rm(path.join(publicDir, filename), { force: true }),
-    ),
-  );
-  createdFiles.clear();
-});
-
 describe('POST /resume/html', () => {
   it('returns a path to a rendered HTML document', async () => {
     const resume = makeResume('html-ok');
@@ -112,8 +98,8 @@ describe('POST /resume/html', () => {
       const { path: filePath } = await response.json();
       assert.match(filePath, /^\/[a-f0-9]{16}\.html$/);
 
-      const filename = track(filePath);
-      const html = await fs.readFile(path.join(publicDir, filename), 'utf8');
+      const filename = filePath.slice(1);
+      const html = await fs.readFile(path.join(app.publicDir, filename), 'utf8');
       assert.ok(html.startsWith('<!DOCTYPE html>'));
       assert.ok(html.includes(resume.basics.name));
 
@@ -125,7 +111,7 @@ describe('POST /resume/html', () => {
     }
   });
 
-  it('returns the same path for identical input without starting a browser', async () => {
+  it('returns the same path for identical input without using puppeteer', async () => {
     const resume = makeResume('html-idempotent');
     let browserCalls = 0;
     const app = await startApp({
@@ -146,9 +132,8 @@ describe('POST /resume/html', () => {
       const secondBody = await second.json();
 
       assert.equal(firstBody.path, secondBody.path);
-      track(firstBody.path);
 
-      await fs.access(path.join(publicDir, firstBody.path.slice(1)));
+      await fs.access(path.join(app.publicDir, firstBody.path.slice(1)));
       assert.equal(browserCalls, 0);
     } finally {
       await app.close();
@@ -169,15 +154,15 @@ describe('POST /resume/pdf', () => {
       const { path: filePath } = await response.json();
       assert.match(filePath, /^\/[a-f0-9]{16}\.pdf$/);
 
-      const filename = track(filePath);
-      const pdf = await fs.readFile(path.join(publicDir, filename), 'utf8');
+      const filename = filePath.slice(1);
+      const pdf = await fs.readFile(path.join(app.publicDir, filename), 'utf8');
       assert.ok(pdf.startsWith('%PDF'));
 
       assert.equal(fakeBrowser.pages.length, 1);
       const [page] = fakeBrowser.pages;
       assert.ok(page.html.includes(resume.basics.name));
       assert.deepEqual(page.pdfOptions, {
-        path: path.join(publicDir, filename),
+        path: path.join(app.publicDir, filename),
         format: 'A4',
         printBackground: true,
       });
@@ -203,9 +188,8 @@ describe('POST /resume/pdf', () => {
       const secondBody = await second.json();
 
       assert.equal(firstBody.path, secondBody.path);
-      track(firstBody.path);
 
-      await fs.access(path.join(publicDir, firstBody.path.slice(1)));
+      await fs.access(path.join(app.publicDir, firstBody.path.slice(1)));
       assert.equal(fakeBrowser.pages.length, 2);
       assert.ok(fakeBrowser.pages.every((page) => page.closed));
     } finally {

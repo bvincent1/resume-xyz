@@ -26,7 +26,7 @@ Root `Makefile`, `Dockerfile.node`, `.vscode/settings.json`, and `.dockerignore`
 - Requires `application_manager/.env` (the Makefile does `include .env`).
 
 ### json-resume-api (run in `json-resume-api/`)
-- `make install` → `pnpm install`; `make dev` → `pnpm start` (`node src/index.js`); `make clean` → delete `public/*.pdf`.
+- `make install` → `pnpm install`; `make dev` → `nodemon src/index.js`; `make test` → `pnpm test`; `make clean` → delete generated `public/*.pdf` and `public/*.html`.
 - `pnpm test` (or `make test`) runs the route tests in `test/` with Node's built-in test runner. `theme/index.test.js` still needs `jest` + `html-validate`, which are not dependencies, and is not picked up by the test script.
 
 ### cf-redirect-worker (run in `cf-redirect-worker/`)

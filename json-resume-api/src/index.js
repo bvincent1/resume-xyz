@@ -6,7 +6,7 @@ const express = require('express');
 const theme = require('../theme');
 
 const port = process.env.PORT || 3000;
-const publicDir = path.join(__dirname, '..', 'public');
+const defaultPublicDir = path.join(__dirname, '..', 'public');
 
 // puppeteer is ESM-only, so load it lazily from CommonJS.
 let puppeteerPromise;
@@ -56,60 +56,65 @@ function renderResume(req, res) {
   };
 }
 
-async function saveResume(extension, hash, write) {
+async function saveResume(publicDir, extension, hash, write) {
   await fs.mkdir(publicDir, { recursive: true });
   const filename = `${hash}.${extension}`;
   await write(path.join(publicDir, filename));
   return filename;
 }
 
-function respondWithPath(res, filename) {
-  console.log({ path: `http://localhost:${port}/${filename}` });
+function respondWithPath(req, res, filename) {
+  console.log({ path: `http://localhost:${req.socket.localPort}/${filename}` });
   res.status(201).json({ path: `/${filename}` });
 }
 
-function createApp({ getBrowser: getBrowserImpl = getBrowser } = {}) {
+function createApp({
+  getBrowser: getBrowserImpl = getBrowser,
+  publicDir = defaultPublicDir,
+} = {}) {
   const app = express();
 
   app.use(express.json());
   app.use(express.static(publicDir));
 
   // Renders the posted JSON Resume to a PDF and stores it in the public dir.
-  app.post('/resume/pdf', async (req, res, next) => {
+  app.post('/resume/pdf', async (req, res) => {
     let page;
     try {
       const rendered = renderResume(req, res);
       if (!rendered) return;
 
-      const filename = await saveResume('pdf', rendered.hash, async (filePath) => {
-        const browser = await getBrowserImpl();
-        page = await browser.newPage();
-        await page.setContent(rendered.html, { waitUntil: 'load' });
-        await page.pdf({ path: filePath, format: 'A4', printBackground: true });
-      });
+      const filename = await saveResume(
+        publicDir,
+        'pdf',
+        rendered.hash,
+        async (filePath) => {
+          const browser = await getBrowserImpl();
+          page = await browser.newPage();
+          await page.setContent(rendered.html, { waitUntil: 'load' });
+          await page.pdf({ path: filePath, format: 'A4', printBackground: true });
+        },
+      );
 
-      respondWithPath(res, filename);
-    } catch (err) {
-      next(err);
+      respondWithPath(req, res, filename);
     } finally {
       if (page) await page.close().catch(() => {});
     }
   });
 
   // Writes the rendered JSON Resume HTML to the public dir.
-  app.post('/resume/html', async (req, res, next) => {
-    try {
-      const rendered = renderResume(req, res);
-      if (!rendered) return;
+  app.post('/resume/html', async (req, res) => {
+    const rendered = renderResume(req, res);
+    if (!rendered) return;
 
-      const filename = await saveResume('html', rendered.hash, (filePath) =>
-        fs.writeFile(filePath, rendered.html),
-      );
+    const filename = await saveResume(
+      publicDir,
+      'html',
+      rendered.hash,
+      (filePath) => fs.writeFile(filePath, rendered.html),
+    );
 
-      respondWithPath(res, filename);
-    } catch (err) {
-      next(err);
-    }
+    respondWithPath(req, res, filename);
   });
 
   app.use((err, req, res, next) => {
@@ -124,10 +129,8 @@ function createApp({ getBrowser: getBrowserImpl = getBrowser } = {}) {
   return app;
 }
 
-const app = createApp();
-
 if (require.main === module) {
-  const server = app.listen(port, () => {
+  const server = createApp().listen(port, () => {
     console.log(`json-resume-api listening on http://localhost:${port}`);
   });
 
@@ -144,5 +147,4 @@ if (require.main === module) {
   process.once('SIGTERM', shutdown);
 }
 
-module.exports = app;
-module.exports.createApp = createApp;
+module.exports = createApp;

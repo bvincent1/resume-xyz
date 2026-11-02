@@ -7,7 +7,7 @@ Renders a JSON Resume object to a PDF or an HTML document and returns a path to 
 - `POST /resume/pdf` — writes `<hash>.pdf` under `public/` and returns `{ "path": "/<hash>.pdf" }`.
 - `POST /resume/html` — writes `<hash>.html` under `public/` and returns `{ "path": "/<hash>.html" }`.
 
-Both files are served statically from `public/`.
+Both files are served statically from `public/`. The previous `POST /resume` route has been replaced by `POST /resume/pdf`.
 
 ## Example
 
