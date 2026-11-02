@@ -1,6 +1,6 @@
 # Job automation module
 
-Status: implemented in `eb5d49a7`.
+Status: implemented.
 
 ## Goal
 
@@ -9,11 +9,12 @@ A `job_automation` app that turns a job-posting URL into a filled-in `Applicatio
 
 ```
 POST /api/job-automation/job-urls/   (X-API-Key)
-        │  create JobURL(status="todo")
+        │  JobURL.objects.get_or_create(...)  →  save()
+        │      └─ on_commit → dispatch_scan
         ▼
 scan_job_url_task (celery)
         │  TinyFish agent.run(goal, url, output_schema=JobPosting)
-        │  → Application.objects.create(title, company, description, job_url, provider)
+        │  → Application.objects.create/refresh(title, company, description, job_url, provider)
         │      └─ save() → on_commit → chain(research → tuning)
         └─ JobURL: status="done", application=app   (or status="failed", error=…)
 ```
@@ -27,8 +28,9 @@ scan_job_url_task (celery)
 | API framework | DRF (`djangorestframework` is already installed and in `INSTALLED_APPS`) — no new dependency |
 | API key | `X-API-Key` header vs `settings.JOB_AUTOMATION_API_KEY` (env-sourced) |
 | Provider for the created application | `PromptProvider.objects.order_by("name").first()` |
-| Scan semantics | One new `Application` per `JobURL`; re-scan is a no-op once linked |
+| Scan semantics | One `Application` per `JobURL`; a forced rescan refreshes the linked application |
 | Extraction | TinyFish `client.agent.run(..., output_schema=…)` — one call, structured JSON |
+| Scan trigger | `JobURL.save()` queues the scan when the URL is new and status is `todo` |
 | Trigger | `Application.save()` queues `chain(research → tuning)` when title/company/description change |
 
 ## 1. New app
@@ -85,6 +87,27 @@ class JobURL(models.Model):
 only additions; they make the scan idempotent and surface failures in the admin. Delete both models
 from `job_applications/models.py`.
 
+`JobURL.save()` owns the scan kickoff:
+
+```python
+def save(self, dispatch: bool = True, **kwargs):
+    scan = (
+        dispatch
+        and self._url_changed()
+        and self.application_id is None
+        and self.status_id is not None
+        and self.status.name == "todo"
+    )
+    super().save(**kwargs)
+    if scan:
+        from .tasks import dispatch_scan
+        transaction.on_commit(lambda: dispatch_scan(self.pk))
+```
+
+`_url_changed()` mirrors `Application._prompt_inputs_changed()`: creation is always a change, later
+saves compare against the stored URL. Status/application updates from the scan therefore never
+re-trigger it.
+
 Migrations keep the existing rows by reusing the old tables:
 
 1. `job_automation/0001_initial.py` — `SeparateDatabaseAndState(database_operations=[], state_operations=[CreateModel URLStatus, CreateModel JobURL])`.
@@ -107,7 +130,7 @@ repo — with scan actions:
 
 - `list_display = ("__str__", "url", "status", "application")`, `readonly_fields = ("application", "error")`
 - `list_filter` on `status`
-- action **Scan selected URLs** and detail action **Scan now** → `scan_job_url_task.delay(pk)`
+- action **Scan selected URLs** and detail action **Scan now** → `scan_job_url_task.delay(pk, force=True)`
 
 ## 4. API endpoint
 
@@ -143,7 +166,6 @@ class JobURLView(APIView):
         )
         if not created:
             return Response({"detail": "already exists", "id": job_url.pk}, status=409)
-        transaction.on_commit(lambda: scan_job_url_task.delay(job_url.pk))
         return Response({"id": job_url.pk, "url": job_url.url, "status": job_url.status.name}, status=201)
 ```
 
@@ -187,20 +209,37 @@ def default_provider() -> PromptProvider:
     return provider
 
 
+def dispatch_scan(job_url_id: int) -> None:
+    try:
+        scan_job_url_task.delay(job_url_id)
+    except Exception:
+        logger.warning("could not dispatch scan for job url %s", job_url_id, exc_info=True)
+
+
 @shared_task
-def scan_job_url_task(job_url_id: int):
+def scan_job_url_task(job_url_id: int, force: bool = False):
     job_url = JobURL.objects.get(pk=job_url_id)
-    if job_url.application_id:
+    if job_url.application_id and not force:
         return
     try:
         posting = scan_posting(job_url.url)
-        application = Application.objects.create(
-            title=posting.title,
-            company=posting.company,
-            description=posting.description[:20_000],
-            job_url=job_url.url,
-            provider=default_provider(),
-        )
+        provider = default_provider()
+        if job_url.application_id:
+            application = job_url.application
+            application.title = posting.title
+            application.company = posting.company
+            application.description = posting.description[:20_000]
+            application.job_url = job_url.url
+            application.provider = provider
+            application.save()
+        else:
+            application = Application.objects.create(
+                title=posting.title,
+                company=posting.company,
+                description=posting.description[:20_000],
+                job_url=job_url.url,
+                provider=provider,
+            )
     except Exception as exc:
         job_url.status, _ = URLStatus.objects.get_or_create(name="failed")
         job_url.error = str(exc)
@@ -211,6 +250,12 @@ def scan_job_url_task(job_url_id: int):
     job_url.error = None
     job_url.save(update_fields=["application", "status", "error"])
 ```
+
+`JobURL.save()` dispatches the scan (`transaction.on_commit`), so the API view, the admin and scripts all
+queue it by creating a row. Guards: the URL must be new, `status` must be `todo`, and no application may
+already be linked. `save(dispatch=False)` opts a caller out (used by the bulk `get_job_urls` import).
+`force=True` bypasses the linked-application check and refreshes the existing application instead of
+creating a second one; the admin actions use it.
 
 - `TinyFish` is imported inside the function (same pattern as `ai.py`) so tests can patch
   `tinyfish.TinyFish`.
@@ -304,6 +349,9 @@ Cases:
 2. **Auth** — missing/wrong key returns 401 and creates no `JobURL`.
 3. **Scan failure** — `agent.run` returns `status="FAILED"`; `JobURL.status == "failed"`, `error` is
    set, and no `Application` exists.
+4. **Forced rescan** — after the happy path, `scan_job_url_task(pk, force=True)` with different scan
+   output updates the linked `Application` in place (`Application.objects.count() == 1`) and re-runs the
+   save-time pipeline.
 
 Run with `poetry run python manage.py test job_automation`.
 
