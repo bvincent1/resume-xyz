@@ -87,6 +87,14 @@ class _FailingTinyFish(_FakeTinyFish):
     status = "FAILED"
 
 
+class _UpdatedTinyFish(_FakeTinyFish):
+    result = {
+        "title": "Staff Engineer",
+        "company": "Acme",
+        "description": "Build more deterministic things.",
+    }
+
+
 class _FakeTuningAgent:
     def __init__(self, output):
         self.output = output
@@ -190,7 +198,7 @@ class JobAutomationIntegrationTests(TransactionTestCase):
     def test_scan_failure_is_recorded(self):
         job_url = JobURL.objects.create(
             url="https://jobs.test/123",
-            status=URLStatus.objects.create(name="todo"),
+            status=URLStatus.objects.create(name="done"),
         )
 
         with self._env():
@@ -202,3 +210,31 @@ class JobAutomationIntegrationTests(TransactionTestCase):
         self.assertEqual(job_url.status.name, "failed")
         self.assertIn("could not scan", job_url.error)
         self.assertFalse(Application.objects.exists())
+
+    def test_force_rescan_updates_the_linked_application(self):
+        with self._env():
+            with patch("tinyfish.TinyFish", _FakeTinyFish):
+                with patch(
+                    "job_applications.ai.build_agent",
+                    return_value=_FakeTuningAgent(self.resume),
+                ):
+                    self._post({"url": "https://jobs.test/123"})
+
+        job_url = JobURL.objects.get()
+
+        with self._env():
+            with patch("tinyfish.TinyFish", _UpdatedTinyFish):
+                with patch(
+                    "job_applications.ai.build_agent",
+                    return_value=_FakeTuningAgent(self.resume),
+                ):
+                    scan_job_url_task(job_url.pk, force=True)
+
+        self.assertEqual(Application.objects.count(), 1)
+        application = Application.objects.get()
+        self.assertEqual(application.title, "Staff Engineer")
+        self.assertEqual(application.description, "Build more deterministic things.")
+
+        job_url.refresh_from_db()
+        self.assertEqual(job_url.application_id, application.pk)
+        self.assertEqual(job_url.status.name, "done")

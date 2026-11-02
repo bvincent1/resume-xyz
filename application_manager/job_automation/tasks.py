@@ -48,24 +48,50 @@ def default_provider() -> PromptProvider:
     return provider
 
 
+def dispatch_scan(job_url_id: int) -> None:
+    """Best-effort dispatch of a URL scan.
+
+    Called from `JobURL.save()` on commit, so a broker that is down must not
+    break the admin save or the API request.
+    """
+    try:
+        scan_job_url_task.delay(job_url_id)
+    except Exception:
+        logger.warning(
+            "could not dispatch scan for job url %s",
+            job_url_id,
+            exc_info=True,
+        )
+
+
 @shared_task
-def scan_job_url_task(job_url_id: int):
-    """Scan one JobURL and create the application it describes."""
+def scan_job_url_task(job_url_id: int, force: bool = False):
+    """Scan one JobURL and create or refresh the application it describes."""
     job_url = JobURL.objects.get(pk=job_url_id)
-    if job_url.application_id:
+    if job_url.application_id and not force:
         return
 
     try:
         posting = scan_posting(job_url.url)
         provider = default_provider()
         logger.info("scanning %s with provider %s", job_url.url, provider.name)
-        application = Application.objects.create(
-            title=posting.title,
-            company=posting.company,
-            description=posting.description[:20_000],
-            job_url=job_url.url,
-            provider=provider,
-        )
+
+        if job_url.application_id:
+            application = job_url.application
+            application.title = posting.title
+            application.company = posting.company
+            application.description = posting.description[:20_000]
+            application.job_url = job_url.url
+            application.provider = provider
+            application.save()
+        else:
+            application = Application.objects.create(
+                title=posting.title,
+                company=posting.company,
+                description=posting.description[:20_000],
+                job_url=job_url.url,
+                provider=provider,
+            )
     except Exception as exc:
         job_url.status, _created = URLStatus.objects.get_or_create(name="failed")
         job_url.error = str(exc)

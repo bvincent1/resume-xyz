@@ -24,7 +24,9 @@ class Command(BaseCommand):
             result_urls = loads(result.stdout)
             for u in result_urls:
                 try:
-                    JobURL(url=u, status=URLStatus.objects.get(name="todo")).save()
+                    JobURL(url=u, status=URLStatus.objects.get(name="todo")).save(
+                        dispatch=False
+                    )
                 except Exception:
                     print(f"something went wrong trying to parse: {u}")
 

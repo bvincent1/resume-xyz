@@ -22,12 +22,12 @@ class JobURLAdmin(ModelAdmin):
     @action(description="Scan selected URLs")
     def scan_selected(self, request, queryset):
         for job_url in queryset:
-            scan_job_url_task.delay(job_url.pk)
+            scan_job_url_task.delay(job_url.pk, force=True)
         self.message_user(request, "Scans queued.")
 
     @action(description="Scan now", url_path="scan-now")
     def scan_now(self, request, object_id: int):
-        scan_job_url_task.delay(object_id)
+        scan_job_url_task.delay(object_id, force=True)
         self.message_user(request, "Scan queued.")
         return redirect(reverse_lazy("admin:job_automation_joburl_changelist"))
 

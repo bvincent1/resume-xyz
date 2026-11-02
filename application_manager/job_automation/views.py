@@ -1,7 +1,6 @@
 import secrets
 
 from django.conf import settings
-from django.db import transaction
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
@@ -10,7 +9,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import JobURL, URLStatus
-from .tasks import scan_job_url_task
 
 
 class APIKeyAuthentication(BaseAuthentication):
@@ -72,8 +70,6 @@ class JobURLView(APIView):
                 ).data,
                 status=409,
             )
-
-        transaction.on_commit(lambda: scan_job_url_task.delay(job_url.pk))
 
         return Response(
             JobURLOutputSerializer(job_url).data,
