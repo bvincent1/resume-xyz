@@ -149,31 +149,42 @@ class APIKeyAuthentication(BaseAuthentication):
         return "X-API-Key"          # makes failures 401, not 403
 
 
-class JobURLInputSerializer(serializers.Serializer):
-    url = serializers.URLField()
+class JobURLSerializer(serializers.ModelSerializer):
+    status = serializers.SlugRelatedField(slug_field="name", read_only=True)
+
+    class Meta:
+        model = JobURL
+        fields = ("id", "url", "status")
 
 
-class JobURLView(APIView):
+@extend_schema_view(
+    post=extend_schema(
+        summary="Create a job URL and queue a scan",
+        responses={
+            201: JobURLSerializer,
+            401: OpenApiResponse(description="Invalid or missing API key."),
+        },
+    ),
+)
+class JobURLView(CreateAPIView):
     authentication_classes = [APIKeyAuthentication]
     permission_classes = []
+    serializer_class = JobURLSerializer
 
-    def post(self, request):
-        data = JobURLInputSerializer(data=request.data)
-        data.is_valid(raise_exception=True)
-        status, _ = URLStatus.objects.get_or_create(name="todo")
-        job_url, created = JobURL.objects.get_or_create(
-            url=data.validated_data["url"], defaults={"status": status}
-        )
-        if not created:
-            return Response({"detail": "already exists", "id": job_url.pk}, status=409)
-        return Response({"id": job_url.pk, "url": job_url.url, "status": job_url.status.name}, status=201)
+    def perform_create(self, serializer):
+        status, _created = URLStatus.objects.get_or_create(name="todo")
+        serializer.save(status=status)
 ```
+
+`CreateAPIView` exposes only `POST`; one `ModelSerializer` handles both the request and the response
+(`status` is read-only, so callers cannot set it). The schema annotation must target `post`, because
+drf-spectacular resolves generic views by HTTP method, not by the `create` mixin.
 
 `urls.py`: `path("job-urls/", JobURLView.as_view(), name="job-url-create")`.
 Root `urls.py`: `path("api/job-automation/", include("job_automation.urls"))` before the catch-all redirect.
 
 - Unset `JOB_AUTOMATION_API_KEY` disables the endpoint (401); it never accepts a blank key.
-- Duplicate URL returns 409 without enqueuing a second scan.
+- A duplicate URL fails the serializer's unique validation and returns 400.
 
 ## 5. TinyFish scan
 
