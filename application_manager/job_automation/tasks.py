@@ -2,6 +2,7 @@ import logging
 import os
 
 from celery import shared_task
+from celery.exceptions import MaxRetriesExceededError
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema
 
@@ -83,8 +84,8 @@ def dispatch_scan(job_url_id: int) -> None:
         )
 
 
-@shared_task
-def scan_job_url_task(job_url_id: int, force: bool = False):
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, acks_late=True)
+def scan_job_url_task(self, job_url_id: int, force: bool = False):
     """Scan one JobURL and create or refresh the application it describes."""
     job_url = JobURL.objects.get(pk=job_url_id)
     if job_url.application_id and not force:
@@ -112,10 +113,13 @@ def scan_job_url_task(job_url_id: int, force: bool = False):
                 provider=provider,
             )
     except Exception as exc:
-        job_url.status, _created = URLStatus.objects.get_or_create(name="failed")
-        job_url.error = str(exc)
-        job_url.save(update_fields=["status", "error"])
-        raise
+        try:
+            raise self.retry(exc=exc)
+        except MaxRetriesExceededError:
+            job_url.status, _created = URLStatus.objects.get_or_create(name="failed")
+            job_url.error = str(exc)
+            job_url.save(update_fields=["status", "error"])
+            raise exc
 
     job_url.application = application
     job_url.status, _created = URLStatus.objects.get_or_create(name="done")
