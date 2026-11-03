@@ -167,6 +167,12 @@ AUTH_USER_MODEL = "accounts.CustomUser"
 # Key the job-automation API requires in the X-API-Key header.
 JOB_AUTOMATION_API_KEY = os.getenv("JOB_AUTOMATION_API_KEY", "")
 
+# Celery time limits, set above the 120s TinyFish scan timeout so the
+# worker can persist `JobURL.error` on the soft kill before the broker
+# re-delivers (acks_late) on the hard kill.
+CELERY_TASK_SOFT_TIME_LIMIT = 240
+CELERY_TASK_TIME_LIMIT = 300
+
 
 UNFOLD = {
     "COMMAND": {
