@@ -25,6 +25,7 @@ function makeResume(label) {
     education: [],
     publications: [],
     awards: [],
+    certificates: [],
     skills: [],
     interests: [],
     meta: {},
@@ -106,6 +107,48 @@ describe('POST /resume/html', () => {
       const fileResponse = await fetch(`${app.baseUrl}${filePath}`);
       assert.equal(fileResponse.status, 200);
       assert.match(fileResponse.headers.get('content-type'), /^text\/html/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('renders certificates between work and education', async () => {
+    const resume = makeResume('certificates');
+    resume.work = [{ name: 'Acme', position: 'Engineer', startDate: '2020-01' }];
+    resume.education = [{ institution: 'Test University' }];
+    resume.certificates = [
+      {
+        name: 'Project Management',
+        issuer: 'Google Coursera',
+        date: '2024-03-07',
+        url: 'https://coursera.deuterium.dev',
+      },
+      {
+        name: 'Advanced Data Engineering',
+        issuer: 'Databricks',
+        date: '2025-07-21',
+      },
+    ];
+    const app = await startApp();
+
+    try {
+      const response = await postJson(app.baseUrl, '/resume/html', resume);
+      assert.equal(response.status, 201);
+
+      const { path: filePath } = await response.json();
+      const html = await fs.readFile(
+        path.join(app.publicDir, filePath.slice(1)),
+        'utf8',
+      );
+
+      assert.ok(html.includes('Project Management'));
+      assert.ok(html.includes('Google Coursera'));
+      assert.ok(html.includes('https://coursera.deuterium.dev'));
+      assert.ok(html.includes('Advanced Data Engineering'));
+      assert.ok(html.includes('Databricks'));
+
+      assert.ok(html.indexOf('Experience') < html.indexOf('Certificates'));
+      assert.ok(html.indexOf('Certificates') < html.indexOf('Education'));
     } finally {
       await app.close();
     }
