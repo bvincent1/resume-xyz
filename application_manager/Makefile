@@ -44,7 +44,8 @@ scheduler:
 
 worker:
 	@env
-	@$(CELERY) -A application_manager worker -l INFO
+	@$(CELERY) -A application_manager worker -l INFO \
+		--concurrency=1 --prefetch-multiplier=1
 .PHONY: worker
 
 
