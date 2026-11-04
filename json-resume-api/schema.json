@@ -120,6 +120,10 @@
             "type": "string",
             "description": "e.g. Software Engineer"
           },
+          "alt_position": {
+            "type": "string",
+            "description": "Alternate position name"
+          },
           "url": {
             "type": "string",
             "description": "e.g. http://facebook.example.com",

@@ -218,7 +218,6 @@ class Application(models.Model):
             )
 
         basics = resume.get("basics") or {}
-        resume["basics"] = basics
 
         github_url = "https://github.deuterium.dev"
         gitlab_url = "https://gitlab.deuterium.dev"
@@ -253,6 +252,12 @@ class Application(models.Model):
             if cert is not None:
                 resume["certificates"].remove(cert)
 
+        work = resume.get("work") or []
+        for position in work:
+            position['alt_position'] = self.title
+
+        resume['work'] = work
+        resume["basics"] = basics
         self.resume_url = generate_pdf(resume)
         self.save()
 

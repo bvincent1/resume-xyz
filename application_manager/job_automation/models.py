@@ -11,6 +11,14 @@ class URLStatus(models.Model):
     def __str__(self):
         return self.name
 
+    @classmethod
+    def get_default_pk(cls):
+        status, _created = cls.objects.get_or_create(
+            name="todo",
+            defaults=dict(name="todo"),
+        )
+        return status.pk
+
 
 class JobURL(models.Model):
     url = models.URLField(unique=True, blank=False, null=False)
@@ -19,6 +27,7 @@ class JobURL(models.Model):
         null=False,
         blank=False,
         on_delete=models.PROTECT,
+        default=URLStatus.get_default_pk
     )
     application = models.OneToOneField(
         "job_applications.Application",
