@@ -41,12 +41,11 @@ def scan_posting(url: str) -> JobPosting:
     """Scan a job posting URL with TinyFish and return its structured fields."""
     from tinyfish import TinyFish  # local import so tests can patch the SDK
 
+    logger.info("scan_posting: {url}")
     client = TinyFish(api_key=os.environ["TINYFISH_API_KEY"], timeout=120)
     # TinyFish rejects the JSON Schema `title` keyword at any depth; strip
     # the ones Pydantic annotates before sending.
     output_schema = JobPosting.model_json_schema(schema_generator=NoTitlesJsonSchema)
-    print(output_schema)
-
     response = client.agent.run(
         goal=(
             "Extract the role title, the hiring company, and the full job "
@@ -94,9 +93,9 @@ def scan_job_url_task(self, job_url_id: int, force: bool = False):
     try:
         posting = scan_posting(job_url.url)
         provider = default_provider()
-        logger.info("scanning %s with provider %s", job_url.url, provider.name)
 
         if job_url.application_id:
+            logger.info("updating %s with provider %s", posting.company, provider.name)
             application = job_url.application
             application.title = posting.title
             application.company = posting.company
@@ -105,6 +104,7 @@ def scan_job_url_task(self, job_url_id: int, force: bool = False):
             application.provider = provider
             application.save()
         else:
+            logger.info("creating %s with provider %s", posting.company, provider.name)
             application = Application.objects.create(
                 title=posting.title,
                 company=posting.company,
