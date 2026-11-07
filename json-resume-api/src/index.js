@@ -63,11 +63,6 @@ async function saveResume(publicDir, extension, hash, write) {
   return filename;
 }
 
-function respondWithPath(req, res, filename) {
-  console.log({ path: `http://localhost:${req.socket.localPort}/${filename}` });
-  res.status(201).json({ path: `/${filename}` });
-}
-
 function createApp({
   getBrowser: getBrowserImpl = getBrowser,
   publicDir = defaultPublicDir,
@@ -78,11 +73,18 @@ function createApp({
   app.use(express.static(publicDir));
 
   // Renders the posted JSON Resume to a PDF and stores it in the public dir.
-  app.post('/resume/pdf', async (req, res) => {
+  app.post('/resume', async (req, res) => {
     let page;
     try {
       const rendered = renderResume(req, res);
       if (!rendered) return;
+
+      await saveResume(
+        publicDir,
+        'html',
+        rendered.hash,
+        (filePath) => fs.writeFile(filePath, rendered.html),
+      );
 
       const filename = await saveResume(
         publicDir,
@@ -96,25 +98,11 @@ function createApp({
         },
       );
 
-      respondWithPath(req, res, filename);
+      console.log({ path: `http://localhost:${req.socket.localPort}/${filename}` });
+      res.redirect(`/${filename}`);
     } finally {
       if (page) await page.close().catch(() => {});
     }
-  });
-
-  // Writes the rendered JSON Resume HTML to the public dir.
-  app.post('/resume/html', async (req, res) => {
-    const rendered = renderResume(req, res);
-    if (!rendered) return;
-
-    const filename = await saveResume(
-      publicDir,
-      'html',
-      rendered.hash,
-      (filePath) => fs.writeFile(filePath, rendered.html),
-    );
-
-    respondWithPath(req, res, filename);
   });
 
   app.use((err, req, res, next) => {
