@@ -241,7 +241,7 @@ class Application(models.Model):
         if coursera is not None:
             coursera["url"] = f"{coursera_url}?{query_params}"
 
-        basics["email"] = f"benjc.vincent+{self.pk}@gmail.com"
+        basics["email"] = f"ben+{self.pk}@deuterium.dev"
 
         if not self.include_project_management:
             cert = _find("certificates", name="Project Management")

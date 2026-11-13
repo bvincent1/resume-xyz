@@ -175,7 +175,7 @@ class BuildPdfTests(SimpleTestCase):
         self.assertEqual(url, "http://pdf")
         self.assertEqual(rendered["basics"]["summary"], "Tuned summary")
         self.assertEqual(
-            rendered["basics"]["email"], "benjc.vincent+1@gmail.com"
+            rendered["basics"]["email"], "ben+1@deuterium.dev"
         )
         self.assertIn("<p>python, django</p>", rendered["payload"])
         self.assertEqual(
