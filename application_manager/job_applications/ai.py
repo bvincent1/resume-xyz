@@ -219,11 +219,6 @@ def get_job_description(ctx: RunContext[PipelineDeps]) -> str:
     return ctx.deps.job_description
 
 
-def get_notes(ctx: RunContext[PipelineDeps]) -> str:
-    """Return my notes/interview questions for this application."""
-    return ctx.deps.notes
-
-
 def get_history(ctx: RunContext[PipelineDeps], company: Company) -> str:
     """Return my work history for the given company."""
     return read_supporting_document(HISTORY_PATHS[company])
@@ -272,8 +267,9 @@ def build_company_brief(company: str) -> str:
             f"{company} company overview products engineering blog recent news"
         )
         search = search_company(query)
-        urls = [result.url for result in search.results[:5] if result.url]
-        pages = fetch_pages(urls[:4]) if urls else None
+        trimmed_results = search.results[:5]
+        urls = [result.url for result in trimmed_results if result.url]
+        pages = fetch_pages(urls) if urls else None
 
         parts = [f"# {company} research"]
         if pages is not None:
@@ -286,10 +282,10 @@ def build_company_brief(company: str) -> str:
             for error in pages.errors:
                 parts.append(f"- could not fetch {error.url}: {error.error}")
         else:
-            for result in search.results[:5]:
+            for result in trimmed_results:
                 parts.append(f"- {result.title} ({result.url}): {result.snippet}")
 
-        brief = "\n\n".join(parts)[:10000]
+        brief = "\n\n".join(parts)
         return f"<company_research>\n{brief}\n</company_research>"
     except Exception as exc:
         logger.exception("company research failed for %s", company)
@@ -307,7 +303,6 @@ def research_company(ctx: RunContext[PipelineDeps]) -> str:
 
 TOOLS = (
     get_job_description,
-    get_notes,
     get_history,
     get_skills,
     get_resume,

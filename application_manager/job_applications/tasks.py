@@ -9,7 +9,6 @@ import requests
 from datetime import timedelta
 from django.conf import settings
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +37,7 @@ def dispatch_application_pipeline(application_id: int) -> None:
         chain(
             generate_company_brief.si(application_id),
             generate_prompts.si(application_id),
+            # generate_pdf.si(application_id),
         ).apply_async()
     except Exception:
         logger.warning(
@@ -102,3 +102,11 @@ def requests_check_urls():
             app.status = deleted_status
         app.last_scanned_requests = timezone.now()
         app.save()
+
+
+@shared_task(bind=True)
+def generate_pdf(self, application_id: int):
+    from .models import Application
+
+    app = Application.objects.get(pk=application_id)
+    app.build_pdf()

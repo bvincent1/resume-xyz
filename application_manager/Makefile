@@ -50,10 +50,10 @@ worker:
 
 
 tests:
-	@docker run --rm -d --name resume-test-pg \
-		-e POSTGRES_PASSWORD=postgres -p 5459:5432 postgres:16-alpine
-	@POSTGRES_URL="postgres://postgres:postgres@localhost:5459/postgres" \
+	@docker compose -f ../e2e/docker-compose.yaml up -d postgres
+	@POSTGRES_URL="postgres://postgres:postgres@localhost:55432/resume_e2e" \
 		$(DJANGO) test job_applications job_automation -v 2
+	@docker compose -f ../e2e/docker-compose.yaml down postgres
 .PHONY: tests
 
 schema:
